@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Figma global CSS */
+@import "../index.css";
+@import "../styles/globals.css";
+
+/* Next / app-level tokens */
 :root {
   --background: #ffffff;
   --foreground: #171717;
