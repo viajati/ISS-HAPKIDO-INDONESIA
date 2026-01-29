@@ -65,7 +65,7 @@ export function Header({
           {/* Right: Login / Account */}
           <div className="flex items-center gap-4">
             <div
-              className="px-3 py-1.5 rounded text-sm shadow-sm"
+              className="px-2.5 py-1.5 rounded text-sm shadow-sm min-w-[140px] text-center"
               style={{ backgroundColor: "var(--coral-0)" }}
             >
               {isLoggedIn ? (
@@ -80,9 +80,9 @@ export function Header({
                 <button
                   type="button"
                   onClick={() => onNavigate("login")}
-                  className="text-white text-xs md:text-sm hover:underline"
+                  className="text-white text-xs md:text-sm hover:underline whitespace-nowrap"
                 >
-                  LOGIN | SIGN UP
+                  MASUK | DAFTAR
                 </button>
               ) : null}
             </div>

@@ -1,8 +1,7 @@
 "use client";
 
-import { ArrowRight, Menu, Search } from "lucide-react";
+import { ArrowRight, Menu } from "lucide-react";
 import Image from "next/image";
-import { useState } from "react";
 
 interface HeroSectionProps {
   onNavigate: (page: string) => void;
@@ -12,13 +11,6 @@ interface HeroSectionProps {
 const heroLogo = "/assets/hapkido-logo.png";
 
 export function HeroSection({ onNavigate, onMenuClick }: HeroSectionProps) {
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    console.log("Search query:", searchQuery);
-  };
-
   return (
     <div
       className="relative text-white py-6 md:py-8 pb-8 md:pb-10"
@@ -27,7 +19,7 @@ export function HeroSection({ onNavigate, onMenuClick }: HeroSectionProps) {
       }}
     >
       <div className="container mx-auto px-4">
-        {/* Menu & Search */}
+        {/* Menu */}
         <div className="flex items-center justify-between gap-3 mb-6">
           <button
             onClick={onMenuClick}
@@ -38,19 +30,6 @@ export function HeroSection({ onNavigate, onMenuClick }: HeroSectionProps) {
             <Menu className="w-4 h-4" />
             <span className="text-xs md:text-sm">Menu Lengkap</span>
           </button>
-
-          <form onSubmit={handleSearch} className="relative ml-auto">
-            <input
-              type="text"
-              placeholder="SEARCH..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-40 md:w-56 px-3 py-1.5 pr-9 rounded text-gray-800 text-xs bg-white border"
-            />
-            <button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2">
-              <Search className="w-4 h-4 text-gray-500" />
-            </button>
-          </form>
         </div>
 
         {/* Hero Content */}
@@ -80,10 +59,10 @@ export function HeroSection({ onNavigate, onMenuClick }: HeroSectionProps) {
             <div className="flex flex-col items-center gap-5">
               <button
                 onClick={() => onNavigate("login")}
-                className="px-9 py-3.5 rounded-lg shadow-lg text-white font-semibold"
+                className="px-9 py-3.5 rounded-lg shadow-lg text-white font-semibold whitespace-nowrap min-w-[180px]"
                 style={{ backgroundColor: "var(--teal-0)" }}
               >
-                Login ke Sistem
+                MASUK | DAFTAR
               </button>
 
               <a
