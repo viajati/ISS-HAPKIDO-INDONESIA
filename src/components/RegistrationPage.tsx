@@ -85,7 +85,7 @@ export function RegistrationPage({ onNavigate, userRole = 'coach' }: Registratio
         {/* Header */}
         <div className="text-center mb-8">
           <img 
-            src={logoImage} 
+            src={logoImage.src} 
             alt="Hapkido Indonesia Logo" 
             className="w-20 h-20 mx-auto mb-4 object-contain"
           />
