@@ -3,6 +3,7 @@ import { useState } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/auth-context";
 import { Eye, EyeOff } from "lucide-react";
 
 interface LoginPageProps {
@@ -10,6 +11,7 @@ interface LoginPageProps {
 }
 
 export function LoginPage({ onNavigate }: LoginPageProps) {
+  const { signIn, fetchProfile } = useAuth();
   const [credentials, setCredentials] = useState({
     email: "",
     password: "",
@@ -65,7 +67,7 @@ export function LoginPage({ onNavigate }: LoginPageProps) {
     setLoading(true);
     try {
       // 1) Login
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await signIn(email, password);
 
       if (error) {
         if (error.message.includes("Invalid login credentials")) {
@@ -90,13 +92,8 @@ export function LoginPage({ onNavigate }: LoginPageProps) {
       }
 
       // 3) Ambil role dari profiles (sesuai desain RLS kamu)
-      const { data: prof, error: profErr } = await supabase
-        .from("profiles")
-        .select("full_name, role")
-        .eq("id", data.user.id)
-        .single();
-
-      if (profErr || !prof) {
+      const prof = await fetchProfile(data.user.id);
+      if (!prof) {
         setErrors({ login: "Profil tidak ditemukan. Hubungi admin." });
         return;
       }

@@ -10,7 +10,7 @@ type AuthContextValue = {
   loadingProfile: boolean;
   signIn: (email: string, password: string) => Promise<any>;
   signOut: () => Promise<void>;
-  fetchProfile: (uid: string) => Promise<void>;
+  fetchProfile: (uid: string) => Promise<Profile | null>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);

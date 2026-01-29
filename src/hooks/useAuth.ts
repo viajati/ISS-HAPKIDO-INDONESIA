@@ -27,7 +27,8 @@ export function useAuth() {
   const lastFetchedUidRef = useRef<string | null>(null);
 
   const fetchProfile = useCallback(
-    async (uid: string) => {
+    async (uid: string): Promise<Profile | null> => {
+      lastFetchedUidRef.current = uid;
       // ✅ Jangan bikin UI balik ke "Memuat..." kalau profile sudah ada
       if (!profile) setLoadingProfile(true);
 
@@ -45,13 +46,13 @@ export function useAuth() {
         // ✅ Abort / cancel itu NORMAL — jangan rusak state
         if (msg.includes("aborterror") || msg.includes("signal is aborted")) {
           setLoadingProfile(false);
-          return;
+          return null;
         }
 
         console.error("fetchProfile error:", error.message);
         setProfile(null);
         setLoadingProfile(false);
-        return;
+        return null;
       }
 
       const profileData = (data as Profile) ?? null;
@@ -67,11 +68,12 @@ export function useAuth() {
         setUser(null);
         setProfile(null);
         setLoadingProfile(false);
-        return;
+        return null;
       }
 
       setProfile(profileData);
       setLoadingProfile(false);
+      return profileData;
     },
     [profile]
   );
