@@ -1,6 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PrivateSidebar } from './PrivateSidebar';
 import { Menu, Plus, TrendingUp, AlertCircle, Activity } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/auth-context';
+import type { Database } from '../lib/database.types';
+import { ModalRingkasanData, type LaporanData } from './ModalRingkasanData';
+import { fetchPelaporData, formatDateOnly } from '../lib/injury-helpers';
+
+type InjuryReport = Database['public']['Tables']['injury_reports']['Row'];
 
 interface DashboardCoachProps {
   onNavigate: (page: string) => void;
@@ -8,45 +15,142 @@ interface DashboardCoachProps {
 
 export function DashboardCoach({ onNavigate }: DashboardCoachProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const { user, profile } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    totalMonth: 0,
+    mild: 0,
+    moderate: 0,
+    severe: 0,
+  });
+  const [recentInjuries, setRecentInjuries] = useState<InjuryReport[]>([]);
+  const [selectedInjury, setSelectedInjury] = useState<LaporanData | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
+    
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      try {
+        // Get current month start and end dates
+        const now = new Date();
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        
+        const firstDayStr = firstDay.toISOString().split('T')[0];
+        const lastDayStr = lastDay.toISOString().split('T')[0];
+
+        // Fetch injury reports for current month (exclude drafts)
+        const { data: reports, error } = await supabase
+          .from('injury_reports')
+          .select('*')
+          .eq('user_id', user.id)
+          .neq('status', 'draft')
+          .gte('injury_date', firstDayStr)
+          .lte('injury_date', lastDayStr)
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Calculate stats using severity_level from database
+        const totalMonth = reports?.length || 0;
+        let mild = 0;
+        let moderate = 0;
+        let severe = 0;
+
+        reports?.forEach((report) => {
+          if (!report.severity_level) return;
+          
+          const severityLevel = report.severity_level.toLowerCase().trim();
+          
+          if (severityLevel === 'ringan') {
+            mild++;
+          } else if (severityLevel === 'sedang') {
+            moderate++;
+          } else if (severityLevel === 'berat') {
+            severe++;
+          }
+        });
+
+        setStats({ totalMonth, mild, moderate, severe });
+
+        // Get 3 most recent injuries
+        const recent = reports?.slice(0, 3) || [];
+        setRecentInjuries(recent);
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [user?.id]);
+
+  // Helper function to get severity label from database
+  const getSeverityLabel = (severityLevel: string | null): string => {
+    if (!severityLevel) return 'TIDAK DIKETAHUI';
+    
+    const level = severityLevel.toLowerCase().trim();
+    
+    if (level === 'ringan') return 'RINGAN';
+    if (level === 'sedang') return 'SEDANG';
+    if (level === 'berat') return 'BERAT';
+    
+    return 'TIDAK DIKETAHUI';
+  };
+
+  // Helper function to get first injury location
+  const getFirstInjuryLocation = (injuries: any): string => {
+    if (Array.isArray(injuries) && injuries.length > 0) {
+      return injuries[0].location || 'Tidak diketahui';
+    }
+    return 'Tidak diketahui';
+  };
 
   const handleLogout = () => {
     onNavigate('logout');
   };
 
-  // Mock data
-  const stats = {
-    totalMonth: 8,
-    mild: 5,
-    moderate: 2,
-    severe: 1,
+  const handleInjuryClick = async (injury: InjuryReport) => {
+    // Convert InjuryReport to LaporanData format
+    const injuries = Array.isArray(injury.injuries) ? injury.injuries : [];
+    const redFlags = Array.isArray(injury.red_flags) ? injury.red_flags : [];
+    
+    // Fetch pelapor data using unified helper
+    const pelapor = await fetchPelaporData(injury.user_id);
+    
+    const laporanData: LaporanData = {
+      id: injury.id.toString(),
+      namaAtlet: injury.athlete_name,
+      jenisKelamin: injury.gender,
+      usia: injury.age,
+      tanggalKejadian: injury.injury_date,
+      jenisAktivitas: injury.activity_type,
+      konteks: injury.activity_context,
+      cederaDetails: injuries.map((inj: any) => ({
+        lokasi: inj.location || '',
+        jenis: inj.type || '',
+        mekanisme: inj.mechanism || ''
+      })),
+      kemampuanGerak: injury.movement_ability,
+      tingkatNyeri: injury.pain_level,
+      redFlags: redFlags.map((flag: any) => typeof flag === 'string' ? flag : flag.name || ''),
+      severityLevel: injury.severity_level || undefined,
+      pelapor,
+      status: injury.status,
+      tanggalLapor: formatDateOnly(injury.created_at),
+      tanggalVerifikasi: formatDateOnly(injury.verified_at),
+      verifikator: injury.verified_by || undefined
+    };
+    
+    setSelectedInjury(laporanData);
+    setIsModalOpen(true);
   };
-
-  const recentInjuries = [
-    {
-      id: '2024-001',
-      date: '2024-12-20',
-      athlete: 'Ahmad Fauzi',
-      location: 'Lutut',
-      severity: 'RINGAN',
-      activity: 'Sparring',
-    },
-    {
-      id: '2024-002',
-      date: '2024-12-18',
-      athlete: 'Siti Nurhaliza',
-      location: 'Pergelangan Kaki',
-      severity: 'SEDANG',
-      activity: 'Latihan Teknik',
-    },
-    {
-      id: '2024-003',
-      date: '2024-12-15',
-      athlete: 'Budi Santoso',
-      location: 'Bahu',
-      severity: 'RINGAN',
-      activity: 'Drill Teknik',
-    },
-  ];
 
   return (
     <div className="min-h-screen bg-gray-50 lg:pl-64">
@@ -78,11 +182,11 @@ export function DashboardCoach({ onNavigate }: DashboardCoachProps) {
             </div>
             <div className="flex items-center gap-3">
               <div className="text-right hidden md:block">
-                <p className="text-sm">Pelatih</p>
-                <p className="text-xs text-gray-600">Dojang Jakarta Pusat</p>
+                <p className="text-sm">{profile?.full_name || 'Pelatih'}</p>
+                <p className="text-xs text-gray-600">{profile?.dojang || profile?.wilayah || 'Indonesia'}</p>
               </div>
               <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white">
-                JD
+                {profile?.full_name?.charAt(0).toUpperCase() || 'P'}
               </div>
             </div>
           </div>
@@ -91,15 +195,23 @@ export function DashboardCoach({ onNavigate }: DashboardCoachProps) {
 
       {/* Main Content */}
       <main className="p-4 md:p-6 lg:p-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+        ) : (
+          <>
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm text-gray-600">Total Laporan Bulan Ini</h3>
               <TrendingUp className="w-5 h-5 text-blue-600" />
             </div>
             <p className="text-3xl">{stats.totalMonth}</p>
-            <p className="text-xs text-gray-500 mt-1">Desember 2024</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
+            </p>
           </div>
 
           <div className="bg-white rounded-lg shadow-md p-6">
@@ -108,7 +220,9 @@ export function DashboardCoach({ onNavigate }: DashboardCoachProps) {
               <Activity className="w-5 h-5 text-green-600" />
             </div>
             <p className="text-3xl text-green-600">{stats.mild}</p>
-            <p className="text-xs text-gray-500 mt-1">{((stats.mild / stats.totalMonth) * 100).toFixed(0)}% dari total</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {stats.totalMonth > 0 ? ((stats.mild / stats.totalMonth) * 100).toFixed(0) : 0}% dari total
+            </p>
           </div>
 
           <div className="bg-white rounded-lg shadow-md p-6">
@@ -117,7 +231,9 @@ export function DashboardCoach({ onNavigate }: DashboardCoachProps) {
               <AlertCircle className="w-5 h-5 text-yellow-600" />
             </div>
             <p className="text-3xl text-yellow-600">{stats.moderate}</p>
-            <p className="text-xs text-gray-500 mt-1">{((stats.moderate / stats.totalMonth) * 100).toFixed(0)}% dari total</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {stats.totalMonth > 0 ? ((stats.moderate / stats.totalMonth) * 100).toFixed(0) : 0}% dari total
+            </p>
           </div>
 
           <div className="bg-white rounded-lg shadow-md p-6">
@@ -126,7 +242,9 @@ export function DashboardCoach({ onNavigate }: DashboardCoachProps) {
               <AlertCircle className="w-5 h-5 text-red-600" />
             </div>
             <p className="text-3xl text-red-600">{stats.severe}</p>
-            <p className="text-xs text-gray-500 mt-1">{((stats.severe / stats.totalMonth) * 100).toFixed(0)}% dari total</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {stats.totalMonth > 0 ? ((stats.severe / stats.totalMonth) * 100).toFixed(0) : 0}% dari total
+            </p>
           </div>
         </div>
 
@@ -135,7 +253,9 @@ export function DashboardCoach({ onNavigate }: DashboardCoachProps) {
           <div className="p-6 border-b border-gray-200 flex items-center justify-between">
             <div>
               <h2>Overview Cedera Terkini</h2>
-              <p className="text-sm text-gray-600 mt-1">3 cedera terakhir yang dilaporkan</p>
+              <p className="text-sm text-gray-600 mt-1">
+                {recentInjuries.length} cedera terakhir yang dilaporkan
+              </p>
             </div>
             <button
               onClick={() => onNavigate('riwayat')}
@@ -145,36 +265,49 @@ export function DashboardCoach({ onNavigate }: DashboardCoachProps) {
             </button>
           </div>
           <div className="p-6 space-y-4">
-            {recentInjuries.map((injury) => (
-              <div
-                key={injury.id}
-                className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
-                onClick={() => onNavigate('riwayat')}
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <p className="text-sm text-gray-900">{injury.athlete}</p>
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs ${
-                        injury.severity === 'RINGAN'
-                          ? 'bg-green-100 text-green-800'
-                          : injury.severity === 'SEDANG'
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {injury.severity}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-600">
-                    {injury.location} • {injury.activity}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-gray-500">{injury.date}</p>
-                </div>
+            {recentInjuries.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <AlertCircle className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                <p>Belum ada laporan cedera bulan ini</p>
               </div>
-            ))}
+            ) : (
+              recentInjuries.map((injury) => {
+                const severity = getSeverityLabel(injury.severity_level);
+                const location = getFirstInjuryLocation(injury.injuries);
+                return (
+                  <div
+                    key={injury.id}
+                    className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                    onClick={() => handleInjuryClick(injury)}
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-1">
+                        <p className="text-sm text-gray-900">{injury.athlete_name}</p>
+                        <span
+                          className={`px-2 py-1 rounded-full text-xs ${
+                            severity === 'RINGAN'
+                              ? 'bg-green-100 text-green-800'
+                              : severity === 'SEDANG'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}
+                        >
+                          {severity}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-600">
+                        {location} • {injury.activity_type}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">
+                        {new Date(injury.injury_date).toLocaleDateString('id-ID')}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -207,7 +340,21 @@ export function DashboardCoach({ onNavigate }: DashboardCoachProps) {
             <p className="text-sm text-yellow-700">Lanjutkan laporan yang belum selesai</p>
           </button>
         </div>
+          </>
+        )}
       </main>
+
+      {/* Modal Ringkasan Data */}
+      {selectedInjury && (
+        <ModalRingkasanData
+          isOpen={isModalOpen}
+          onClose={() => {
+            setIsModalOpen(false);
+            setSelectedInjury(null);
+          }}
+          data={selectedInjury}
+        />
+      )}
     </div>
   );
 }

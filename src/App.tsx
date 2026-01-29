@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useAuth } from "./contexts/auth-context";
 
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
@@ -26,6 +26,7 @@ import { InputCederaPage } from "./components/InputCederaPage";
 import { RiwayatPage } from "./components/RiwayatPage";
 import { DraftPage } from "./components/DraftPage";
 import { ProfilPage } from "./components/ProfilPage";
+import { ChangePasswordPage } from "./components/ChangePasswordPage";
 import { PanduanPrivatePage } from "./components/PanduanPrivatePage";
 import { LogoutPage } from "./components/LogoutPage";
 import { FAQsPage } from "./components/FAQsPage";
@@ -44,61 +45,77 @@ function safeScrollToTop() {
   if (typeof window !== "undefined") window.scrollTo(0, 0);
 }
 
-function setUrlPage(page: string) {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  url.searchParams.set("page", page);
-  window.history.replaceState(null, "", url.toString());
-}
-
-function getInitialPageFromUrl(): string {
+function getPageFromUrl(): string {
   if (typeof window === "undefined") return "home";
   const url = new URL(window.location.href);
   return url.searchParams.get("page") || "home";
 }
 
-export default function App() {
-  const searchParams = useSearchParams();
+/**
+ * ✅ SPA URL updater
+ * - push: true => pushState (biar Back/Forward works)
+ * - push: false => replaceState (biar ga nambah history)
+ */
+function setUrlPage(page: string, opts?: { push?: boolean; clearHash?: boolean }) {
+  if (typeof window === "undefined") return;
 
+  const url = new URL(window.location.href);
+  url.searchParams.set("page", page);
+
+  // optional: bersihkan hash (mis. setelah reset password)
+  if (opts?.clearHash) url.hash = "";
+
+  // bersihin error params kalau ada
+  url.searchParams.delete("error");
+  url.searchParams.delete("error_code");
+  url.searchParams.delete("error_description");
+
+  if (opts?.push) window.history.pushState(null, "", url.toString());
+  else window.history.replaceState(null, "", url.toString());
+}
+
+export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // ✅ initial dari URL (?page=...)
-  const [currentPage, setCurrentPage] = useState<string>(getInitialPageFromUrl());
+  // ✅ Start with "home" to avoid hydration mismatch, will sync with URL in useEffect
+  const [currentPage, setCurrentPage] = useState<string>("home");
   const [previousPage, setPreviousPage] = useState<string>("home");
 
-  // Mock role/name (you’ll replace this with Supabase later)
-  const [userRole, setUserRole] = useState<AppRole>("coach");
-  const [userName, setUserName] = useState<string>("Ahmad Pratama");
-  const [pendingRole] = useState<PendingRole>("coach"); // currently unused setter in your code
+  // ✅ Get real user data from auth context
+  const { user, profile, loadingProfile } = useAuth();
+  const [pendingRole] = useState<PendingRole>("coach");
 
-  // ✅ sinkronin: kalau URL berubah (mis. user buka link reset dari email)
+  // ✅ Derive userRole from actual profile data
+  const userRole: AppRole = profile?.role === "admin_nasional" ? "national" : profile?.role === "admin_daerah" ? "regional" : "coach";
+  const userName = profile?.full_name || "User";
+
+  /**
+   * ✅ Sync: kalau user buka link langsung dari email / share URL
+   * dan juga kalau user klik Back/Forward di browser
+   */
   useEffect(() => {
-    const page = searchParams.get("page");
-    if (!page) return;
+    // Pastikan URL punya page param (biar konsisten)
+    const initial = getPageFromUrl();
+    setUrlPage(initial, { push: false }); // normalize
+    setCurrentPage(initial);
 
-    // jangan loop: hanya set kalau beda
-    setCurrentPage((prev) => (prev === page ? prev : page));
-  }, [searchParams]);
+    const onPopState = () => {
+      const page = getPageFromUrl();
+      setCurrentPage(page);
+      safeScrollToTop();
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   const handleNavigate = (page: string) => {
     setPreviousPage(currentPage);
 
-    // Track user role when navigating to dashboards (mock behavior)
-    if (page === "dashboard-coach") {
-      setUserRole("coach");
-      setUserName("Ahmad Pratama");
-    } else if (page === "dashboard-regional") {
-      setUserRole("regional");
-      setUserName("Budi Santoso");
-    } else if (page === "dashboard-national") {
-      setUserRole("national");
-      setUserName("Dr. Siti Nurhaliza");
-    }
-
     setCurrentPage(page);
 
-    // ✅ update URL supaya button/link bisa pakai /?page=login dll
-    setUrlPage(page);
+    // ✅ update URL (push) supaya Back/Forward works
+    setUrlPage(page, { push: true });
 
     safeScrollToTop();
   };
@@ -106,11 +123,11 @@ export default function App() {
   const handleLogout = () => {
     setPreviousPage(currentPage);
     setCurrentPage("logout");
-    setUrlPage("logout");
+    setUrlPage("logout", { push: true });
     safeScrollToTop();
   };
 
-  // Helpers for components that expect Indonesian role strings
+  // Helpers for components that expect Indonesian role strings (“pelatih”, “admin_daerah”, ...)
   const mappedRole =
     userRole === "coach"
       ? "pelatih"
@@ -118,12 +135,8 @@ export default function App() {
       ? "admin_daerah"
       : "admin_nasional";
 
-  const userWilayah =
-    userRole === "regional"
-      ? "Jawa Barat"
-      : userRole === "coach"
-      ? "DKI Jakarta"
-      : undefined;
+  // ✅ Get actual wilayah from profile
+  const userWilayah = profile?.wilayah || undefined;
 
   // Render different pages based on currentPage state
   switch (currentPage) {
@@ -141,14 +154,12 @@ export default function App() {
       return <ForgotPasswordPage onNavigate={handleNavigate} />;
 
     case "reset-password":
-      // ✅ important: supaya /?page=reset-password dari link email bisa render ini
+      // ✅ email reset link -> /?page=reset-password#access_token=...
+      // ResetPasswordPage kamu akan handle hash tokennya.
       return <ResetPasswordPage />;
 
     case "verifikasi-email":
       return <EmailVerificationPage onNavigate={handleNavigate} />;
-
-    // case "forgot-username":
-    //   return <ForgotUsernamePage onNavigate={handleNavigate} />;
 
     case "request-token":
       return <RequestTokenPage onNavigate={handleNavigate} />;
@@ -189,65 +200,34 @@ export default function App() {
 
     case "input-cedera":
       return (
-        <InputCederaPage
-          onNavigate={handleNavigate}
-          userRole={userRole}
-          onLogout={handleLogout}
-        />
+        <InputCederaPage onNavigate={handleNavigate} onLogout={handleLogout} />
       );
 
     case "riwayat":
-      return (
-        <RiwayatPage
-          onNavigate={handleNavigate}
-          userRole={userRole}
-          onLogout={handleLogout}
-        />
-      );
+      return <RiwayatPage onNavigate={handleNavigate} onLogout={handleLogout} />;
 
     case "draft":
-      return (
-        <DraftPage
-          onNavigate={handleNavigate}
-          userRole={userRole}
-          onLogout={handleLogout}
-        />
-      );
+      return <DraftPage onNavigate={handleNavigate} onLogout={handleLogout} />;
 
     case "profil":
-      return (
-        <ProfilPage
-          onNavigate={handleNavigate}
-          userRole={userRole}
-          onLogout={handleLogout}
-        />
-      );
+      return <ProfilPage onNavigate={handleNavigate} onLogout={handleLogout} />;
+
+    case "change-password":
+      return <ChangePasswordPage onNavigate={handleNavigate} />;
 
     case "panduan-private":
       return (
-        <PanduanPrivatePage
-          onNavigate={handleNavigate}
-          userRole={userRole}
-          onLogout={handleLogout}
-        />
+        <PanduanPrivatePage onNavigate={handleNavigate} onLogout={handleLogout} />
       );
 
     case "visualisasi-data":
       return (
-        <VisualisasiData
-          onNavigate={handleNavigate}
-          userRole={mappedRole}
-          userWilayah={userWilayah}
-        />
+        <VisualisasiData onNavigate={handleNavigate} />
       );
 
     case "download-center":
       return (
-        <DownloadCenter
-          onNavigate={handleNavigate}
-          userRole={mappedRole}
-          userWilayah={userWilayah}
-        />
+        <DownloadCenter onNavigate={handleNavigate} />
       );
 
     case "manajemen-pengguna":

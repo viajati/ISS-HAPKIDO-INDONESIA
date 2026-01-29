@@ -1,32 +1,71 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { PrivateSidebar } from './PrivateSidebar';
-import { Users, Search, Shield, UserCircle, ChevronLeft, ChevronRight, Power, PowerOff } from 'lucide-react';
+import { Users, Search, Shield, UserCircle, ChevronLeft, ChevronRight, Power, PowerOff, Copy, Check } from 'lucide-react';
+import { useAuth } from '../contexts/auth-context';
+import { toast } from 'sonner';
+import { supabase } from '../lib/supabase';
+import { PROVINSI_INDONESIA } from '../lib/constants';
 
 interface ManajemenPenggunaProps {
   onNavigate: (page: string) => void;
 }
 
 interface User {
-  id: number;
+  id: string; // UUID from profiles.id
   nama: string;
   email: string;
   role: 'admin_daerah' | 'pelatih';
-  wilayah: string;
+  wilayah: string | null;
   status: 'active' | 'inactive';
   registeredDate: string;
 }
 
+async function getAccessToken() {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
+}
+
 export function ManajemenPengguna({ onNavigate }: ManajemenPenggunaProps) {
+  const { profile, loadingProfile } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRole, setFilterRole] = useState<'all' | 'admin_daerah' | 'pelatih'>('all');
-  const [filterWilayah, setFilterWilayah] = useState('all');
+  const [filterWilayah, setFilterWilayah] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const itemsPerPage = 10;
 
   const handleLogout = () => {
     onNavigate('logout');
   };
+
+  const copyToClipboard = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+      toast.success('ID berhasil disalin');
+    } catch (err) {
+      toast.error('Gagal menyalin ID');
+    }
+  };
+
+  // Access control - only admin nasional can access this page
+  useEffect(() => {
+    if (loadingProfile) return;
+    
+    if (!profile) {
+      toast.error('Anda harus login terlebih dahulu');
+      onNavigate('login');
+      return;
+    }
+
+    if (profile.role !== 'admin_nasional') {
+      toast.error('Akses ditolak. Halaman ini hanya untuk Admin Nasional.');
+      onNavigate('dashboard');
+      return;
+    }
+  }, [loadingProfile, profile, onNavigate]);
 
   // Data pengguna dari backend
   const [users, setUsers] = useState<User[]>([]);
@@ -37,20 +76,27 @@ export function ManajemenPengguna({ onNavigate }: ManajemenPenggunaProps) {
     const fetchUsers = async () => {
       setLoading(true);
       setError(null);
+
       try {
-        const res = await fetch('/api/users');
+        const token = await getAccessToken();
+        if (!token) throw new Error('Session tidak ditemukan. Silakan login ulang.');
+
+        const res = await fetch('/api/users', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Gagal mengambil data pengguna');
-        // Map backend fields to User type
+
         setUsers(
           (json.users || []).map((u: any) => ({
             id: u.id,
-            nama: u.nama,
-            email: u.email,
+            nama: u.full_name ?? '-',
+            email: u.email ?? '-',
             role: u.role,
-            wilayah: u.wilayah,
-            status: u.status,
-            registeredDate: u.created_at ? u.created_at.slice(0, 10) : '',
+            wilayah: u.wilayah ?? null,
+            status: u.is_active ? 'active' : 'inactive',
+            registeredDate: u.created_at ? String(u.created_at).slice(0, 10) : '',
           }))
         );
       } catch (err: any) {
@@ -59,25 +105,41 @@ export function ManajemenPengguna({ onNavigate }: ManajemenPenggunaProps) {
         setLoading(false);
       }
     };
-    fetchUsers();
-  }, []);
+
+    // biar tidak fetch sebelum profile siap
+    if (!loadingProfile && profile?.role === 'admin_nasional') fetchUsers();
+  }, [loadingProfile, profile]);
 
   // Fungsi untuk toggle status akun
-  const handleToggleStatus = (userId: number, currentStatus: 'active' | 'inactive') => {
-    const action = currentStatus === 'active' ? 'menonaktifkan' : 'mengaktifkan';
-    const confirmMessage = `Apakah Anda yakin ingin ${action} akun ini?`;
-    
-    if (confirm(confirmMessage)) {
-      setUsers(prevUsers =>
-        prevUsers.map(user =>
-          user.id === userId
-            ? { ...user, status: currentStatus === 'active' ? 'inactive' : 'active' }
-            : user
-        )
+  const handleToggleStatus = async (userId: string, currentStatus: 'active' | 'inactive') => {
+    const nextActive = currentStatus !== 'active';
+    const action = nextActive ? 'mengaktifkan' : 'menonaktifkan';
+
+    if (!confirm(`Apakah Anda yakin ingin ${action} akun ini?`)) return;
+
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error('Session tidak ditemukan. Silakan login ulang.');
+
+      const res = await fetch('/api/users/toggle', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ userId, nextActive }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Gagal update status');
+
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, status: nextActive ? 'active' : 'inactive' } : u))
       );
-      
-      // Notifikasi sukses (dalam implementasi nyata, ini bisa menggunakan toast notification)
-      alert(`Akun berhasil ${currentStatus === 'active' ? 'dinonaktifkan' : 'diaktifkan'}`);
+
+      toast.success(`Akun berhasil ${nextActive ? 'diaktifkan' : 'dinonaktifkan'}`);
+    } catch (e: any) {
+      toast.error(e.message || 'Gagal update status');
     }
   };
 
@@ -86,20 +148,21 @@ export function ManajemenPengguna({ onNavigate }: ManajemenPenggunaProps) {
     const matchesSearch = user.nama.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRole = filterRole === 'all' || user.role === filterRole;
-    const matchesWilayah = filterWilayah === 'all' || user.wilayah === filterWilayah;
+    const matchesWilayah = !filterWilayah || 
+                          (user.wilayah && user.wilayah.toLowerCase().includes(filterWilayah.toLowerCase()));
     return matchesSearch && matchesRole && matchesWilayah;
   });
 
-  // Wilayah options
-  const wilayahOptions = [
-    'DKI Jakarta',
-    'Jawa Barat',
-    'Jawa Tengah',
-    'Jawa Timur',
-    'Bali',
-    'Sumatra Utara',
-    'Sulawesi Selatan'
-  ];
+  // Get unique wilayah for suggestions
+  const wilayahSuggestions = useMemo(() => {
+    const uniqueWilayah = new Set<string>();
+    users.forEach(u => {
+      if (u.wilayah && PROVINSI_INDONESIA.includes(u.wilayah as any)) {
+        uniqueWilayah.add(u.wilayah);
+      }
+    });
+    return Array.from(uniqueWilayah).sort((a, b) => a.localeCompare(b, 'id-ID'));
+  }, [users]);
 
   // Statistics
   const stats = {
@@ -119,6 +182,20 @@ export function ManajemenPengguna({ onNavigate }: ManajemenPenggunaProps) {
     setCurrentPage(page);
   };
 
+  // Show loading while checking access
+  if (loadingProfile) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  // Don't render if not authorized
+  if (!profile || profile.role !== 'admin_nasional') {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 lg:pl-64">
       <PrivateSidebar
@@ -127,7 +204,7 @@ export function ManajemenPengguna({ onNavigate }: ManajemenPenggunaProps) {
         onNavigate={onNavigate}
         userRole="admin_nasional"
         onLogout={handleLogout}
-        currentPage="manajemen_pengguna"
+        currentPage="manajemen-pengguna"
       />
 
       {/* Header */}
@@ -135,7 +212,12 @@ export function ManajemenPengguna({ onNavigate }: ManajemenPenggunaProps) {
         <div className="px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              {/* Triple stripe menu removed */}
+              <button
+                onClick={() => setIsSidebarOpen(true)}
+                className="lg:hidden text-gray-600 hover:text-gray-900"
+              >
+                <Users className="w-6 h-6" />
+              </button>
               <div>
                 <h1 className="text-xl">Kelola Akun</h1>
                 <p className="text-sm text-gray-600">Manajemen akun Admin Daerah dan Pelatih</p>
@@ -214,7 +296,7 @@ export function ManajemenPengguna({ onNavigate }: ManajemenPenggunaProps) {
             <div className="flex gap-3">
               <select
                 value={filterRole}
-                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFilterRole(e.target.value)}
+                onChange={(e) => setFilterRole(e.target.value as 'all' | 'admin_daerah' | 'pelatih')}
                 className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="all">Semua Role</option>
@@ -222,16 +304,19 @@ export function ManajemenPengguna({ onNavigate }: ManajemenPenggunaProps) {
                 <option value="pelatih">Pelatih</option>
               </select>
 
-              <select
+              <input
+                type="text"
+                placeholder="Filter provinsi..."
                 value={filterWilayah}
                 onChange={(e) => setFilterWilayah(e.target.value)}
+                list="wilayah-suggestions"
                 className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="all">Semua Wilayah</option>
-                {wilayahOptions.map(wilayah => (
-                  <option key={wilayah} value={wilayah}>{wilayah}</option>
+              />
+              <datalist id="wilayah-suggestions">
+                {PROVINSI_INDONESIA.map(provinsi => (
+                  <option key={provinsi} value={provinsi} />
                 ))}
-              </select>
+              </datalist>
             </div>
           </div>
         </div>
@@ -280,7 +365,25 @@ export function ManajemenPengguna({ onNavigate }: ManajemenPenggunaProps) {
                   currentUsers.map((user) => (
                     <tr key={user.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{user.id}</div>
+                        <div className="flex items-center gap-2">
+                          <span 
+                            className="font-mono text-xs text-blue-600"
+                            title={user.id}
+                          >
+                            {user.id.slice(0, 8)}...
+                          </span>
+                          <button
+                            onClick={() => copyToClipboard(user.id)}
+                            className="p-1 hover:bg-gray-100 rounded transition-colors"
+                            title="Copy full ID"
+                          >
+                            {copiedId === user.id ? (
+                              <Check className="w-3.5 h-3.5 text-green-600" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5 text-gray-400" />
+                            )}
+                          </button>
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">{user.nama}</div>

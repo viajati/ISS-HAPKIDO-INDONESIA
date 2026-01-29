@@ -3,12 +3,16 @@ import { FileText, Trash2, Edit, Clock, Calendar, Menu, Search, RefreshCw, Plus 
 import { PrivateSidebar } from "./PrivateSidebar";
 
 import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { useAuth } from "../contexts/auth-context";
 
 type DraftRow = {
   id: number;
   athlete_name: string | null;
   injury_date: string | null;
+  activity_type: string | null;
+  activity_type_other: string | null;
+  activity_context: string | null;
+  activity_context_other: string | null;
   injuries: Array<{ location: string; injuryType: string; mechanism: string }> | null;
   updated_at: string | null;
   created_at: string | null;
@@ -44,8 +48,8 @@ function inferInjuryTitle(injuries: DraftRow["injuries"]) {
   return `${type}${loc}`;
 }
 
-export function DraftPage({ onNavigate, userRole = "coach", onLogout }: Omit<DraftPageProps, "userName">) {
-  const { user, loadingProfile } = useAuth();
+export function DraftPage({ onNavigate, onLogout }: Omit<DraftPageProps, "userName" | "userRole">) {
+  const { user, loadingProfile, profile } = useAuth();
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -56,8 +60,11 @@ export function DraftPage({ onNavigate, userRole = "coach", onLogout }: Omit<Dra
 
   const [query, setQuery] = useState("");
 
-  // Map userRole to format expected by PrivateSidebar
-  const mappedRole = userRole === "coach" ? "pelatih" : userRole === "regional" ? "admin_daerah" : "admin_nasional";
+  // Get role from profile context
+  const mappedRole = useMemo(() => {
+    if (!profile?.role) return "pelatih";
+    return profile.role;
+  }, [profile?.role]);
 
   const handleLogout = () => {
     // ✅ bersihkan mode draft edit kalau logout
@@ -81,7 +88,7 @@ export function DraftPage({ onNavigate, userRole = "coach", onLogout }: Omit<Dra
       // RLS: owner can read their own drafts
       const { data, error } = await supabase
         .from("injury_reports")
-        .select("id, athlete_name, injury_date, injuries, updated_at, created_at, status")
+        .select("id, athlete_name, injury_date, activity_type, activity_type_other, activity_context, activity_context_other, injuries, updated_at, created_at, status")
         .eq("user_id", user.id)
         .eq("status", "draft")
         .order("updated_at", { ascending: false });

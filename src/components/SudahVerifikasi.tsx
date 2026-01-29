@@ -13,9 +13,10 @@ import {
   Undo2,
 } from "lucide-react";
 import { ModalRingkasanData } from "./ModalRingkasanData";
+import { toast } from "sonner";
 
 import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { useAuth } from "../contexts/auth-context";
 
 interface SudahVerifikasiProps {
   onNavigate: (page: string) => void;
@@ -50,13 +51,14 @@ type DbRow = {
   movement_ability: string | null;
   pain_level: string | null;
   red_flags: string[] | null;
+  severity_level: string | null;
 
   status: "verified" | "rejected" | string;
   verified_by: string | null;
   verified_at: string | null;
 
-  // join profiles returns array
-  profiles: ProfileJoin[] | null;
+  // ✅ many-to-one join returns object, but handle array too for robustness
+  profiles: ProfileJoin | ProfileJoin[] | null;
 };
 
 interface LaporanVerified {
@@ -114,9 +116,10 @@ function normalizeActivity(base?: string | null, other?: string | null) {
   return o ? `${b} (${o})` : b;
 }
 
-function firstProfile(profiles?: ProfileJoin[] | null): ProfileJoin | null {
-  if (!profiles || profiles.length === 0) return null;
-  return profiles[0];
+function firstProfile(p?: ProfileJoin | ProfileJoin[] | null): ProfileJoin | null {
+  if (!p) return null;
+  if (Array.isArray(p)) return p[0] ?? null;
+  return p; // object
 }
 
 function computeDerajatFromForm(movementAbility?: string | null, painLevel?: string | null, redFlags?: string[] | null) {
@@ -156,7 +159,7 @@ function typeSummary(injuries?: DbRow["injuries"]) {
 }
 
 export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
-  const { user, loadingProfile } = useAuth();
+  const { user, loadingProfile, profile } = useAuth();
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -178,6 +181,23 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
 
   const handleLogout = () => onNavigate("logout");
 
+  // Access control - only admin nasional can access this page
+  useEffect(() => {
+    if (loadingProfile) return;
+    
+    if (!profile) {
+      toast.error('Anda harus login terlebih dahulu');
+      onNavigate('login');
+      return;
+    }
+
+    if (profile.role !== 'admin_nasional') {
+      toast.error('Akses ditolak. Halaman ini hanya untuk Admin Nasional.');
+      onNavigate('dashboard');
+      return;
+    }
+  }, [loadingProfile, profile, onNavigate]);
+
   const loadReviewed = async () => {
     setLoading(true);
     setErrorMsg(null);
@@ -198,8 +218,9 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
           activity_type, activity_type_other,
           activity_context, activity_context_other,
           injuries, movement_ability, pain_level, red_flags,
+          severity_level,
           status, verified_by, verified_at,
-          profiles:profiles!injury_reports_user_id_fkey(full_name, role, wilayah, email)
+          profiles:profiles!injury_reports_user_id_fkey!inner(full_name, role, wilayah, email)
         `
         )
         .in("status", ["verified", "rejected"])
@@ -227,7 +248,10 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
         const tanggalLapor = formatDateYMD(r.created_at);
         const tanggalVerifikasi = formatDateYMD(r.verified_at ?? r.updated_at);
 
-        const derajat = computeDerajatFromForm(r.movement_ability, r.pain_level, r.red_flags);
+        // Use pre-calculated severity_level from database (fallback to compute if null)
+        const derajat = r.severity_level 
+          ? (r.severity_level === 'ringan' ? 'Ringan' : r.severity_level === 'sedang' ? 'Sedang' : 'Berat')
+          : computeDerajatFromForm(r.movement_ability, r.pain_level, r.red_flags);
 
         const cederaDetails =
           Array.isArray(r.injuries) && r.injuries.length > 0
@@ -385,6 +409,20 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
   // reset page when filters change
   useEffect(() => setCurrentPage(1), [searchQuery, filterDerajat, filterWilayah, filterStatus]);
 
+  // Show loading while checking access
+  if (loadingProfile) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  // Don't render if not authorized
+  if (!profile || profile.role !== 'admin_nasional') {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 lg:pl-64">
       <PrivateSidebar
@@ -530,8 +568,8 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
                 ) : (
                   currentData.map((laporan) => (
                     <tr key={laporan.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm">{laporan.id}</span>
+                      <td className="px-6 py-4 text-sm whitespace-nowrap">
+                        <span className="font-mono text-blue-600">{laporan.id}</span>
                       </td>
 
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -669,7 +707,8 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
           kemampuanGerak: selectedLaporan?.kemampuanGerak || "",
           tingkatNyeri: selectedLaporan?.tingkatNyeri || "",
           redFlags: selectedLaporan?.redFlags || [],
-          pelapor: selectedLaporan?.pelapor,
+          severityLevel: selectedLaporan?.cedera.derajat.toLowerCase() || undefined,
+          pelapor: selectedLaporan?.pelapor || { nama: "-", wilayah: "-" },
           status: selectedLaporan?.status,
           tanggalLapor: selectedLaporan?.tanggalLapor,
           tanggalVerifikasi: selectedLaporan?.tanggalVerifikasi,

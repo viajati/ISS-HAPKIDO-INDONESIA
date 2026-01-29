@@ -1,22 +1,25 @@
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+"use client";
+
+import { useMemo, useState } from "react";
 import { Mail, AlertTriangle, CheckCircle } from "lucide-react";
-import { supabase } from "../lib/supabase"; // ✅ pastikan path benar
+import { supabase } from "../lib/supabase";
 
-// No props needed
+type ForgotPasswordPageProps = {
+  onNavigate: (page: string) => void;
+};
 
-export function ForgotPasswordPage() {
-  const router = useRouter();
+export function ForgotPasswordPage({ onNavigate }: ForgotPasswordPageProps) {
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // ✅ sesuaikan dengan URL FE kamu yang bener
-  // - kalau pakai Vite: http://localhost:5173
-  // - kalau production: https://domainkamu.com
-  const RESET_REDIRECT_URL = `${window.location.origin}/reset-password`;
+  // ✅ redirect reset harus ke SPA URL kamu: /?page=reset-password
+  const RESET_REDIRECT_URL = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return `${window.location.origin}/?page=reset-password`;
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,20 +33,15 @@ export function ForgotPasswordPage() {
 
     setLoading(true);
     try {
-      // ✅ Supabase: kirim email reset password
       const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
         redirectTo: RESET_REDIRECT_URL,
       });
-
       if (error) throw error;
 
       setSubmitted(true);
     } catch (err) {
-      // Supabase kadang kasih pesan teknis, kita bikin lebih manusiawi
       const msg =
-        err instanceof Error
-          ? err.message
-          : "Gagal mengirim link reset. Coba lagi.";
+        err instanceof Error ? err.message : "Gagal mengirim link reset. Coba lagi.";
       setErrorMsg(msg);
       setSubmitted(false);
     } finally {
@@ -59,7 +57,6 @@ export function ForgotPasswordPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
-        {/* Header */}
         <div className="text-center mb-8">
           <img
             src="/assets/hapkido-logo.png"
@@ -72,7 +69,6 @@ export function ForgotPasswordPage() {
           </p>
         </div>
 
-        {/* Error */}
         {errorMsg && (
           <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
             <div className="flex gap-2 items-start">
@@ -123,21 +119,24 @@ export function ForgotPasswordPage() {
                 <CheckCircle className="w-6 h-6 text-green-600" />
               </div>
               <p className="text-green-800 text-sm">
-                Jika email <span className="font-medium">{email}</span> terdaftar, kami sudah mengirim link reset.
-                Silakan cek Inbox/Spam.
+                Jika email <span className="font-medium">{email}</span> terdaftar,
+                kami sudah mengirim link reset. Silakan cek Inbox/Spam.
               </p>
             </div>
 
-            <button onClick={handleRetry} className="text-blue-600 hover:underline text-sm" type="button">
+            <button
+              onClick={handleRetry}
+              className="text-blue-600 hover:underline text-sm"
+              type="button"
+            >
               Tidak menerima email? Coba lagi
             </button>
           </div>
         )}
 
-        {/* Back to Login */}
         <div className="mt-6 text-center">
           <button
-            onClick={() => router.push("/login")}
+            onClick={() => onNavigate("login")}
             className="text-gray-500 hover:text-gray-700 text-sm"
             type="button"
           >

@@ -1,19 +1,25 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { PrivateSidebar } from './PrivateSidebar';
 import { Menu, Calendar, Filter, Download } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { useAuth } from '../contexts/auth-context';
+import { supabase } from '../lib/supabase';
+import { toast } from 'sonner';
 
 interface VisualisasiDataProps {
   onNavigate: (page: string) => void;
-  userRole?: 'pelatih' | 'admin_daerah' | 'admin_nasional';
-  userWilayah?: string;
+}
+
+// Helper to get access token
+async function getAccessToken() {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
 }
 
 export function VisualisasiData({ 
-  onNavigate, 
-  userRole = 'admin_nasional',
-  userWilayah = 'DKI Jakarta'
+  onNavigate
 }: VisualisasiDataProps) {
+  const { profile, loadingProfile } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'visualisasi' | 'crosstab'>('visualisasi');
   const [periodeFilter, setPeriodeFilter] = useState<'6bulan' | '1tahun' | 'tahun' | 'custom'>('6bulan');
@@ -21,141 +27,143 @@ export function VisualisasiData({
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
+  // State for visualisasi data
+  const [vizLoading, setVizLoading] = useState(false);
+  const [vizError, setVizError] = useState<string | null>(null);
+  const [dataPerBulan, setDataPerBulan] = useState<any[]>([]);
+  const [dataDerajat, setDataDerajat] = useState<any[]>([]);
+  const [dataLokasi, setDataLokasi] = useState<any[]>([]);
+  const [dataAktivitas, setDataAktivitas] = useState<any[]>([]);
+
+  // State for crosstab data
+  const [crosstabLoading, setCrosstabLoading] = useState(false);
+  const [crosstabError, setCrosstabError] = useState<string | null>(null);
+  const [crosSummary, setCrosSummary] = useState<any[]>([]);
+  const [crosJenis, setCrosJenis] = useState<any[]>([]);
+  const [crosMekanisme, setCrosMekanisme] = useState<any[]>([]);
+  const [crosLokasi, setCrosLokasi] = useState<any[]>([]);
+  const [crosDerajat, setCrosDerajat] = useState<any[]>([]);
+
   const handleLogout = () => {
     onNavigate('logout');
   };
 
+  // Get role and region from profile
+  const userRole = useMemo(() => profile?.role || 'pelatih', [profile?.role]);
+  const userWilayah = useMemo(() => profile?.wilayah || 'DKI Jakarta', [profile?.wilayah]);
   const isNasional = userRole === 'admin_nasional';
 
-  // Data untuk Visualisasi Umum (Nasional atau per Wilayah)
-  const dataPerBulan6Bulan = [
-    { bulan: 'Jul 2024', jumlah: 12, ringan: 5, sedang: 4, berat: 3 },
-    { bulan: 'Ags 2024', jumlah: 15, ringan: 6, sedang: 6, berat: 3 },
-    { bulan: 'Sep 2024', jumlah: 18, ringan: 8, sedang: 7, berat: 3 },
-    { bulan: 'Okt 2024', jumlah: 14, ringan: 6, sedang: 5, berat: 3 },
-    { bulan: 'Nov 2024', jumlah: 20, ringan: 9, sedang: 8, berat: 3 },
-    { bulan: 'Des 2024', jumlah: 16, ringan: 7, sedang: 6, berat: 3 },
-  ];
+  // Compute date range based on filter
+  function computeRange() {
+    const today = new Date();
+    const end = new Date(today);
+    let start = new Date(today);
 
-  const dataPerBulan1Tahun = [
-    { bulan: 'Jan 2024', jumlah: 10, ringan: 4, sedang: 4, berat: 2 },
-    { bulan: 'Feb 2024', jumlah: 8, ringan: 3, sedang: 3, berat: 2 },
-    { bulan: 'Mar 2024', jumlah: 12, ringan: 5, sedang: 5, berat: 2 },
-    { bulan: 'Apr 2024', jumlah: 11, ringan: 5, sedang: 4, berat: 2 },
-    { bulan: 'Mei 2024', jumlah: 14, ringan: 6, sedang: 5, berat: 3 },
-    { bulan: 'Jun 2024', jumlah: 13, ringan: 5, sedang: 5, berat: 3 },
-    { bulan: 'Jul 2024', jumlah: 12, ringan: 5, sedang: 4, berat: 3 },
-    { bulan: 'Ags 2024', jumlah: 15, ringan: 6, sedang: 6, berat: 3 },
-    { bulan: 'Sep 2024', jumlah: 18, ringan: 8, sedang: 7, berat: 3 },
-    { bulan: 'Okt 2024', jumlah: 14, ringan: 6, sedang: 5, berat: 3 },
-    { bulan: 'Nov 2024', jumlah: 20, ringan: 9, sedang: 8, berat: 3 },
-    { bulan: 'Des 2024', jumlah: 16, ringan: 7, sedang: 6, berat: 3 },
-  ];
+    if (periodeFilter === "6bulan") {
+      start.setMonth(start.getMonth() - 6);
+    } else if (periodeFilter === "1tahun") {
+      start.setFullYear(start.getFullYear() - 1);
+    } else if (periodeFilter === "tahun") {
+      start = new Date(Number(selectedYear), 0, 1);
+      end.setTime(new Date(Number(selectedYear), 11, 31).getTime());
+    } else if (periodeFilter === "custom") {
+      return { start: customStartDate, end: customEndDate };
+    }
 
-  const dataPerBulan2023 = [
-    { bulan: 'Jan 2023', jumlah: 8, ringan: 3, sedang: 3, berat: 2 },
-    { bulan: 'Feb 2023', jumlah: 7, ringan: 3, sedang: 2, berat: 2 },
-    { bulan: 'Mar 2023', jumlah: 10, ringan: 4, sedang: 4, berat: 2 },
-    { bulan: 'Apr 2023', jumlah: 9, ringan: 4, sedang: 3, berat: 2 },
-    { bulan: 'Mei 2023', jumlah: 11, ringan: 5, sedang: 4, berat: 2 },
-    { bulan: 'Jun 2023', jumlah: 10, ringan: 4, sedang: 4, berat: 2 },
-    { bulan: 'Jul 2023', jumlah: 9, ringan: 4, sedang: 3, berat: 2 },
-    { bulan: 'Ags 2023', jumlah: 12, ringan: 5, sedang: 5, berat: 2 },
-    { bulan: 'Sep 2023', jumlah: 14, ringan: 6, sedang: 6, berat: 2 },
-    { bulan: 'Okt 2023', jumlah: 11, ringan: 5, sedang: 4, berat: 2 },
-    { bulan: 'Nov 2023', jumlah: 15, ringan: 7, sedang: 6, berat: 2 },
-    { bulan: 'Des 2023', jumlah: 13, ringan: 6, sedang: 5, berat: 2 },
-  ];
+    const toISO = (d: Date) => d.toISOString().slice(0, 10);
+    return { start: toISO(start), end: toISO(end) };
+  }
 
-  // Pilih data berdasarkan filter periode
-  const getDataByPeriod = () => {
-    if (periodeFilter === '6bulan') return dataPerBulan6Bulan;
-    if (periodeFilter === '1tahun') return dataPerBulan1Tahun;
-    if (periodeFilter === 'tahun' && selectedYear === '2023') return dataPerBulan2023;
-    if (periodeFilter === 'tahun' && selectedYear === '2024') return dataPerBulan1Tahun;
-    return dataPerBulan6Bulan; // default
-  };
+  // Access control - only admin nasional can access this page
+  useEffect(() => {
+    if (loadingProfile) return;
+    
+    if (!profile) {
+      toast.error('Anda harus login terlebih dahulu');
+      onNavigate('login');
+      return;
+    }
 
-  const dataPerBulan = getDataByPeriod();
+    if (profile.role !== 'admin_nasional') {
+      toast.error('Akses ditolak. Halaman ini hanya untuk Admin Nasional.');
+      onNavigate('dashboard');
+      return;
+    }
+  }, [loadingProfile, profile, onNavigate]);
 
-  // Data Derajat Cedera (Pie Chart)
-  const dataDerajat = [
-    { name: 'Ringan', value: 45, color: '#10b981' },
-    { name: 'Sedang', value: 38, color: '#f59e0b' },
-    { name: 'Berat', value: 17, color: '#ef4444' },
-  ];
+  // Fetch visualisasi data
+  useEffect(() => {
+    if (!profile || profile.role !== "admin_nasional") return;
 
-  // Data Lokasi Cedera (Bar Chart)
-  const dataLokasi = [
-    { lokasi: 'Lutut', jumlah: 28 },
-    { lokasi: 'Pergelangan Kaki', jumlah: 22 },
-    { lokasi: 'Bahu', jumlah: 15 },
-    { lokasi: 'Pergelangan Tangan', jumlah: 12 },
-    { lokasi: 'Kepala', jumlah: 10 },
-    { lokasi: 'Punggung', jumlah: 8 },
-  ];
+    const run = async () => {
+      const { start, end } = computeRange();
+      setVizLoading(true);
+      setVizError(null);
 
-  // Data Jenis Aktivitas (Bar Chart)
-  const dataAktivitas = [
-    { aktivitas: 'Latihan Teknik', jumlah: 35 },
-    { aktivitas: 'Sparring', jumlah: 30 },
-    { aktivitas: 'Latihan Fisik', jumlah: 20 },
-    { aktivitas: 'Pertandingan', jumlah: 10 },
-    { aktivitas: 'Lainnya', jumlah: 5 },
-  ];
+      try {
+        const token = await getAccessToken();
+        if (!token) throw new Error("Session tidak ditemukan");
 
-  // Data untuk Crosstabulasi (Per Wilayah)
-  const dataCrosstabPerBulan = isNasional ? [
-    { bulan: 'Jul 2024', 'DKI Jakarta': 5, 'Jawa Barat': 3, 'Jawa Tengah': 2, 'Jawa Timur': 2 },
-    { bulan: 'Ags 2024', 'DKI Jakarta': 6, 'Jawa Barat': 4, 'Jawa Tengah': 3, 'Jawa Timur': 2 },
-    { bulan: 'Sep 2024', 'DKI Jakarta': 7, 'Jawa Barat': 5, 'Jawa Tengah': 4, 'Jawa Timur': 2 },
-    { bulan: 'Okt 2024', 'DKI Jakarta': 5, 'Jawa Barat': 4, 'Jawa Tengah': 3, 'Jawa Timur': 2 },
-    { bulan: 'Nov 2024', 'DKI Jakarta': 8, 'Jawa Barat': 6, 'Jawa Tengah': 4, 'Jawa Timur': 2 },
-    { bulan: 'Des 2024', 'DKI Jakarta': 6, 'Jawa Barat': 5, 'Jawa Tengah': 3, 'Jawa Timur': 2 },
-  ] : [
-    // Data spesifik wilayah untuk pelatih/admin daerah
-    { bulan: 'Jul 2024', [userWilayah]: 5 },
-    { bulan: 'Ags 2024', [userWilayah]: 6 },
-    { bulan: 'Sep 2024', [userWilayah]: 7 },
-    { bulan: 'Okt 2024', [userWilayah]: 5 },
-    { bulan: 'Nov 2024', [userWilayah]: 8 },
-    { bulan: 'Des 2024', [userWilayah]: 6 },
-  ];
+        const res = await fetch(`/api/analytics/visualisasi?start=${start}&end=${end}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-  const dataCrosstabDerajat = isNasional ? [
-    { wilayah: 'DKI Jakarta', ringan: 12, sedang: 10, berat: 5 },
-    { wilayah: 'Jawa Barat', ringan: 10, sedang: 8, berat: 4 },
-    { wilayah: 'Jawa Tengah', ringan: 8, sedang: 7, berat: 4 },
-    { wilayah: 'Jawa Timur', ringan: 7, sedang: 6, berat: 2 },
-    { wilayah: 'Bali', ringan: 5, sedang: 4, berat: 1 },
-    { wilayah: 'Sumatra Utara', ringan: 3, sedang: 3, berat: 1 },
-  ] : [
-    { wilayah: userWilayah, ringan: 12, sedang: 10, berat: 5 },
-  ];
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Gagal memuat data visualisasi");
 
-  const dataCrosstabLokasi = isNasional ? [
-    { lokasi: 'Lutut', 'DKI Jakarta': 10, 'Jawa Barat': 8, 'Jawa Tengah': 6, 'Jawa Timur': 4 },
-    { lokasi: 'Pergelangan Kaki', 'DKI Jakarta': 8, 'Jawa Barat': 6, 'Jawa Tengah': 5, 'Jawa Timur': 3 },
-    { lokasi: 'Bahu', 'DKI Jakarta': 5, 'Jawa Barat': 4, 'Jawa Tengah': 4, 'Jawa Timur': 2 },
-    { lokasi: 'Pergelangan Tangan', 'DKI Jakarta': 4, 'Jawa Barat': 3, 'Jawa Tengah': 3, 'Jawa Timur': 2 },
-  ] : [
-    { lokasi: 'Lutut', [userWilayah]: 10 },
-    { lokasi: 'Pergelangan Kaki', [userWilayah]: 8 },
-    { lokasi: 'Bahu', [userWilayah]: 5 },
-    { lokasi: 'Pergelangan Tangan', [userWilayah]: 4 },
-  ];
+        setDataPerBulan(json.dataPerBulan || []);
+        setDataDerajat(json.dataDerajat || []);
+        setDataLokasi(json.dataLokasi || []);
+        setDataAktivitas(json.dataAktivitas || []);
+      } catch (e: any) {
+        setVizError(e.message);
+        toast.error(e.message);
+      } finally {
+        setVizLoading(false);
+      }
+    };
 
-  const dataCrosstabAktivitas = isNasional ? [
-    { aktivitas: 'Latihan Teknik', 'DKI Jakarta': 12, 'Jawa Barat': 10, 'Jawa Tengah': 8, 'Jawa Timur': 5 },
-    { aktivitas: 'Sparring', 'DKI Jakarta': 10, 'Jawa Barat': 8, 'Jawa Tengah': 7, 'Jawa Timur': 5 },
-    { aktivitas: 'Latihan Fisik', 'DKI Jakarta': 7, 'Jawa Barat': 6, 'Jawa Tengah': 4, 'Jawa Timur': 3 },
-    { aktivitas: 'Pertandingan', 'DKI Jakarta': 4, 'Jawa Barat': 3, 'Jawa Tengah': 2, 'Jawa Timur': 1 },
-  ] : [
-    { aktivitas: 'Latihan Teknik', [userWilayah]: 12 },
-    { aktivitas: 'Sparring', [userWilayah]: 10 },
-    { aktivitas: 'Latihan Fisik', [userWilayah]: 7 },
-    { aktivitas: 'Pertandingan', [userWilayah]: 4 },
-  ];
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.id, profile?.role, periodeFilter, selectedYear, customStartDate, customEndDate]);
+
+  // Fetch crosstab data (only when tab is active)
+  useEffect(() => {
+    if (!profile || profile.role !== "admin_nasional") return;
+    if (activeTab !== "crosstab") return;
+
+    const run = async () => {
+      const { start, end } = computeRange();
+      setCrosstabLoading(true);
+      setCrosstabError(null);
+
+      try {
+        const token = await getAccessToken();
+        if (!token) throw new Error("Session tidak ditemukan");
+
+        const res = await fetch(`/api/analytics/crosstab?start=${start}&end=${end}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Gagal memuat crosstab");
+
+        setCrosSummary(json.summary || []);
+        setCrosJenis(json.jenis_cedera || []);
+        setCrosMekanisme(json.mekanisme || []);
+        setCrosLokasi(json.lokasi || []);
+        setCrosDerajat(json.derajat || []);
+      } catch (e: any) {
+        setCrosstabError(e.message);
+        toast.error(e.message);
+      } finally {
+        setCrosstabLoading(false);
+      }
+    };
+
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, periodeFilter, selectedYear, customStartDate, customEndDate, profile?.id]);
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
 
@@ -167,6 +175,20 @@ export function VisualisasiData({
     return '6 Bulan Terakhir';
   };
 
+  // Show loading while checking access
+  if (loadingProfile) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  // Don't render if not authorized
+  if (!profile || profile.role !== 'admin_nasional') {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 lg:pl-64">
       <PrivateSidebar
@@ -175,8 +197,7 @@ export function VisualisasiData({
         onNavigate={onNavigate}
         onLogout={handleLogout}
         currentPage="visualisasi-data"
-        userRole={userRole}
-        // userName removed
+        userRole="admin_nasional"
       />
 
       {/* Header */}
@@ -300,6 +321,18 @@ export function VisualisasiData({
         {/* Tab Content - Visualisasi Umum */}
         {activeTab === 'visualisasi' && (
           <>
+            {vizLoading ? (
+              <div className="bg-white rounded-lg shadow-md p-12 mb-6 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <p className="text-gray-600">Memuat data visualisasi...</p>
+              </div>
+            ) : vizError ? (
+              <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+                  {vizError}
+                </div>
+              </div>
+            ) : (
             <div className="bg-white rounded-lg shadow-md p-6 mb-6">
               <h2 className="mb-4">Visualisasi Data - {getPeriodLabel()}</h2>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -351,7 +384,11 @@ export function VisualisasiData({
                       <XAxis type="number" />
                       <YAxis dataKey="lokasi" type="category" width={120} tick={{ fontSize: 12 }} />
                       <Tooltip />
-                      <Bar dataKey="jumlah" fill="#f59e0b" name="Jumlah" />
+                      <Bar dataKey="jumlah" name="Jumlah">
+                        {dataLokasi.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color || '#f59e0b'} />
+                        ))}
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -365,18 +402,35 @@ export function VisualisasiData({
                       <XAxis type="number" />
                       <YAxis dataKey="aktivitas" type="category" width={120} tick={{ fontSize: 12 }} />
                       <Tooltip />
-                      <Bar dataKey="jumlah" fill="#10b981" name="Jumlah" />
+                      <Bar dataKey="jumlah" name="Jumlah">
+                        {dataAktivitas.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color || '#10b981'} />
+                        ))}
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
             </div>
+            )}
           </>
         )}
 
         {/* Tab Content - Crosstabulasi */}
         {activeTab === 'crosstab' && (
           <>
+            {crosstabLoading ? (
+              <div className="bg-white rounded-lg shadow-md p-12 mb-6 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <p className="text-gray-600">Memuat data crosstab...</p>
+              </div>
+            ) : crosstabError ? (
+              <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+                  {crosstabError}
+                </div>
+              </div>
+            ) : (
             <div className="bg-white rounded-lg shadow-md p-6 mb-6">
               <div className="mb-6">
                 <h2 className="mb-2">
@@ -402,105 +456,90 @@ export function VisualisasiData({
                   </thead>
                   <tbody>
                     {/* Total Atlet & Cedera */}
-                    <tr className="bg-gray-50">
-                      <td className="border border-gray-300 px-4 py-2 font-semibold">Atlet</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">45</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">38</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center font-semibold bg-gray-100">83</td>
-                    </tr>
-                    <tr className="bg-gray-50">
-                      <td className="border border-gray-300 px-4 py-2 font-semibold">Cedera</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">52</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">41</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center font-semibold bg-gray-100">93</td>
-                    </tr>
+                    {(() => {
+                      const atletRow = crosSummary.find(r => r.kategori === 'Atlet');
+                      const cederaRow = crosSummary.find(r => r.kategori === 'Cedera');
+                      
+                      return (
+                        <>
+                          <tr className="bg-gray-50">
+                            <td className="border border-gray-300 px-4 py-2 font-semibold">Atlet</td>
+                            <td className="border border-gray-300 px-4 py-2 text-center">{atletRow?.training || 0}</td>
+                            <td className="border border-gray-300 px-4 py-2 text-center">{atletRow?.competition || 0}</td>
+                            <td className="border border-gray-300 px-4 py-2 text-center font-semibold bg-gray-100">{atletRow?.total || 0}</td>
+                          </tr>
+                          <tr className="bg-gray-50">
+                            <td className="border border-gray-300 px-4 py-2 font-semibold">Cedera</td>
+                            <td className="border border-gray-300 px-4 py-2 text-center">{cederaRow?.training || 0}</td>
+                            <td className="border border-gray-300 px-4 py-2 text-center">{cederaRow?.competition || 0}</td>
+                            <td className="border border-gray-300 px-4 py-2 text-center font-semibold bg-gray-100">{cederaRow?.total || 0}</td>
+                          </tr>
+                        </>
+                      );
+                    })()}
 
                     {/* Jenis Cedera */}
                     <tr className="bg-blue-50">
                       <td className="border border-gray-300 px-4 py-2 font-semibold italic" colSpan={4}>
-                        Jenis Cedera
+                        Jenis Cedera (Top 5)
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Sprain</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">18</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">12</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">30</td>
-                    </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Strain</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">15</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">10</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">25</td>
-                    </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Dislokasi</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">8</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">9</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">17</td>
-                    </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Fraktur</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">5</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">6</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">11</td>
-                    </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Kontusi</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">6</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">4</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">10</td>
-                    </tr>
+                    {crosJenis.length > 0 ? (
+                      crosJenis.slice(0, 5).map((row, idx) => (
+                        <tr key={`jenis-${idx}`}>
+                          <td className="border border-gray-300 px-4 py-2 pl-8">{row.kategori}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center">{row.training}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center">{row.competition}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">{row.total}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="border border-gray-300 px-4 py-2 pl-8 text-gray-400 italic" colSpan={4}>Tidak ada data</td>
+                      </tr>
+                    )}
 
                     {/* Mekanisme Cedera */}
                     <tr className="bg-blue-50">
                       <td className="border border-gray-300 px-4 py-2 font-semibold italic" colSpan={4}>
-                        Mekanisme Cedera
+                        Mekanisme Cedera (Top 5)
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Kontak dengan Lawan</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">12</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">18</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">30</td>
-                    </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Non-Kontak</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">25</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">15</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">40</td>
-                    </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Overuse</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">15</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">8</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">23</td>
-                    </tr>
+                    {crosMekanisme.length > 0 ? (
+                      crosMekanisme.slice(0, 5).map((row, idx) => (
+                        <tr key={`mekanisme-${idx}`}>
+                          <td className="border border-gray-300 px-4 py-2 pl-8">{row.kategori}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center">{row.training}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center">{row.competition}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">{row.total}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="border border-gray-300 px-4 py-2 pl-8 text-gray-400 italic" colSpan={4}>Tidak ada data</td>
+                      </tr>
+                    )}
 
                     {/* Lokasi Cedera */}
                     <tr className="bg-blue-50">
                       <td className="border border-gray-300 px-4 py-2 font-semibold italic" colSpan={4}>
-                        Lokasi Cedera Terbanyak
+                        Lokasi Cedera (Top 5)
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Lutut</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">12</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">10</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">22</td>
-                    </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Pergelangan Kaki</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">10</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">8</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">18</td>
-                    </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Bahu</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">8</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">7</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">15</td>
-                    </tr>
+                    {crosLokasi.length > 0 ? (
+                      crosLokasi.slice(0, 5).map((row, idx) => (
+                        <tr key={`lokasi-${idx}`}>
+                          <td className="border border-gray-300 px-4 py-2 pl-8">{row.kategori}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center">{row.training}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center">{row.competition}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">{row.total}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="border border-gray-300 px-4 py-2 pl-8 text-gray-400 italic" colSpan={4}>Tidak ada data</td>
+                      </tr>
+                    )}
 
                     {/* Derajat Cedera */}
                     <tr className="bg-blue-50">
@@ -508,24 +547,20 @@ export function VisualisasiData({
                         Derajat Cedera
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Ringan</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">30</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">20</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">50</td>
-                    </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Sedang</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">18</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">15</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">33</td>
-                    </tr>
-                    <tr>
-                      <td className="border border-gray-300 px-4 py-2 pl-8">Berat</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">4</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center">6</td>
-                      <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">10</td>
-                    </tr>
+                    {crosDerajat.length > 0 ? (
+                      crosDerajat.map((row, idx) => (
+                        <tr key={`derajat-${idx}`}>
+                          <td className="border border-gray-300 px-4 py-2 pl-8">{row.kategori}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center">{row.training}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center">{row.competition}</td>
+                          <td className="border border-gray-300 px-4 py-2 text-center bg-gray-50">{row.total}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="border border-gray-300 px-4 py-2 pl-8 text-gray-400 italic" colSpan={4}>Tidak ada data</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -538,6 +573,7 @@ export function VisualisasiData({
                 </p>
               </div>
             </div>
+            )}
           </>
         )}
       </main>

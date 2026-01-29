@@ -2,8 +2,9 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { PrivateSidebar } from "./PrivateSidebar";
 import { Menu, ChevronRight, ChevronLeft, CheckCircle, AlertTriangle, Info } from "lucide-react";
 import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { useAuth } from "../contexts/auth-context";
 import { ModalRingkasanData, LaporanData } from "./ModalRingkasanData";
+import { fetchPelaporData, formatDateOnly } from "../lib/injury-helpers";
 
 interface InputCederaPageProps {
   onNavigate: (page: string) => void;
@@ -41,10 +42,18 @@ interface InjuryFormData {
 
 export function InputCederaPage({
   onNavigate,
-  userRole = "coach",
+  userRole: userRoleProp,
   onLogout,
 }: Omit<InputCederaPageProps, "userName">): React.ReactElement {
-  const { user, loadingProfile } = useAuth();
+  const { user, loadingProfile, profile } = useAuth();
+
+  // ✅ Derive userRole from profile instead of relying on prop
+  const userRole: "coach" | "regional" | "national" = useMemo(() => {
+    if (!profile?.role) return "coach";
+    if (profile.role === "admin_nasional") return "national";
+    if (profile.role === "admin_daerah") return "regional";
+    return "coach";
+  }, [profile?.role]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
@@ -58,6 +67,10 @@ export function InputCederaPage({
 
   // status UI: Simpan Draft -> 'draft', Ajukan -> 'submitted'
   const [reportStatus, setReportStatus] = useState<"draft" | "submitted">("draft");
+  
+  // Track pelapor data and submission date for modal
+  const [pelaporData, setPelaporData] = useState<{ nama: string; wilayah: string } | null>(null);
+  const [submissionDate, setSubmissionDate] = useState<string | undefined>(undefined);
 
   const [formData, setFormData] = useState<InjuryFormData>({
     athleteName: "",
@@ -78,8 +91,18 @@ export function InputCederaPage({
   // ✅ Modal Ringkasan (dipakai di Step 4 sebagai modal, bukan inline)
   const [showRingkasanModal, setShowRingkasanModal] = useState(false);
 
-  // Map userRole to format expected by PrivateSidebar
-  const mappedRole = userRole === "coach" ? "pelatih" : userRole === "regional" ? "admin_daerah" : "admin_nasional";
+  // Fetch pelapor data when user is available
+  useEffect(() => {
+    if (user?.id) {
+      fetchPelaporData(user.id).then(setPelaporData);
+    }
+  }, [user?.id]);
+
+  // Map profile.role to format expected by PrivateSidebar
+  const mappedRole = useMemo(() => {
+    if (!profile?.role) return "pelatih";
+    return profile.role;
+  }, [profile?.role]);
 
   const handleLogout = () => {
     // ✅ biar aman: keluar = reset mode edit draft
@@ -100,7 +123,12 @@ export function InputCederaPage({
       { value: "ujian_tingkat", label: "Ujian Kenaikan Tingkat" },
       { value: "training_camp", label: "Training Camp Daerah" },
       { value: "lainnya", label: "Lainnya" },
-      { value: "kejadian_lain", label: "Kejadian lain" },
+    ],
+    national: [
+      { value: "pertandingan", label: "Pertandingan/Kejuaraan" },
+      { value: "ujian_tingkat", label: "Ujian Kenaikan Tingkat" },
+      { value: "training_camp", label: "Training Camp Nasional" },
+      { value: "lainnya", label: "Lainnya" },
     ],
   };
 
@@ -113,6 +141,11 @@ export function InputCederaPage({
       { value: "lainnya", label: "Lainnya" },
     ],
     regional: [
+      { value: "pemanasan_pendinginan", label: "Pemanasan/Pendinginan" },
+      { value: "pertandingan", label: "Pertandingan" },
+      { value: "lainnya", label: "Lainnya" },
+    ],
+    national: [
       { value: "pemanasan_pendinginan", label: "Pemanasan/Pendinginan" },
       { value: "pertandingan", label: "Pertandingan" },
       { value: "lainnya", label: "Lainnya" },
@@ -153,10 +186,22 @@ export function InputCederaPage({
   // Mechanism options
   const mechanismOptions = ["Jatuh", "Benturan dengan lawan", "Kuncian", "Penggunaan berulang", "Kelelahan", "Lainnya"];
 
-  // Decision tree calculation
+  // Helper to calculate severity level (for database storage)
+  const calculateSeverityLevel = (movementAbility: string, painLevel: string, redFlags: string[]): string => {
+    if (redFlags.length > 0 || movementAbility === "unable_to_move" || painLevel === "severe") {
+      return "berat";
+    }
+    if (movementAbility === "limited_movement" || painLevel === "moderate") {
+      return "sedang";
+    }
+    return "ringan";
+  };
+
+  // Decision tree calculation (for UI display)
   const calculateSeverityAndRecommendations = () => {
     const { movementAbility, painLevel, redFlags } = formData;
 
+    // BERAT: red flags OR unable to move OR severe pain
     if (redFlags.length > 0 || movementAbility === "unable_to_move" || painLevel === "severe") {
       return {
         severity: "BERAT",
@@ -170,15 +215,30 @@ export function InputCederaPage({
       };
     }
 
+    // SEDANG: limited movement OR moderate pain
+    if (movementAbility === "limited_movement" || painLevel === "moderate") {
+      return {
+        severity: "SEDANG",
+        recommendations: [
+          "Latihan boleh dilanjutkan dengan modifikasi",
+          "Intensitas diturunkan 30-50%",
+          "Hindari gerakan yang memicu nyeri",
+          "Monitor ketat kondisi atlet",
+          "Rujuk bila tidak membaik dalam 3-5 hari",
+          "Tetap dicatat di ISS",
+        ],
+      };
+    }
+
+    // RINGAN: normal movement AND mild pain AND no red flags
     return {
-      severity: "RINGAN-SEDANG",
+      severity: "RINGAN",
       recommendations: [
-        "Latihan boleh dilanjutkan terbatas",
-        "Intensitas diturunkan",
-        "Hindari teknik berisiko",
-        "Pantau kondisi atlet",
-        "Rujuk bila tidak membaik",
-        "Tetap dicatat di ISS",
+        "Latihan dapat dilanjutkan",
+        "Tetap pantau kondisi atlet",
+        "Hindari overtraining",
+        "Ice/rest bila perlu",
+        "Catat di ISS untuk monitoring",
       ],
     };
   };
@@ -300,6 +360,13 @@ export function InputCederaPage({
     (status: "draft" | "submitted") => {
       if (!user?.id) throw new Error("Anda belum login.");
 
+      // Calculate severity level once and store it
+      const severityLevel = calculateSeverityLevel(
+        formData.movementAbility,
+        formData.painLevel,
+        formData.redFlags
+      );
+
       return {
         user_id: user.id,
         athlete_name: formData.athleteName.trim(),
@@ -311,10 +378,11 @@ export function InputCederaPage({
         activity_context: formData.activityContext,
         activity_context_other: formData.activityContextOther?.trim() || null,
         injury_count: formData.injuryCount,
-        injuries: formData.injuries,
+        injuries: formData.injuries as any,
         movement_ability: formData.movementAbility,
         pain_level: formData.painLevel,
-        red_flags: formData.redFlags,
+        red_flags: formData.redFlags as any,
+        severity_level: severityLevel,
         status,
         updated_at: new Date().toISOString(),
       };
@@ -417,10 +485,10 @@ export function InputCederaPage({
           activityContext: data.activity_context ?? "",
           activityContextOther: data.activity_context_other ?? "",
           injuryCount: data.injury_count ?? 1,
-          injuries: Array.isArray(data.injuries) && data.injuries.length > 0 ? data.injuries : [{ location: "", injuryType: "", mechanism: "" }],
+          injuries: Array.isArray(data.injuries) && data.injuries.length > 0 ? data.injuries as unknown as InjuryDetail[] : [{ location: "", injuryType: "", mechanism: "" }],
           movementAbility: data.movement_ability ?? "",
           painLevel: data.pain_level ?? "",
-          redFlags: Array.isArray(data.red_flags) ? data.red_flags : [],
+          redFlags: Array.isArray(data.red_flags) ? data.red_flags as unknown as string[] : [],
         });
 
         setCurrentStep(1);
@@ -439,11 +507,21 @@ export function InputCederaPage({
   const handleSubmit = async () => {
     try {
       await upsertReport("submitted");
+      // Set submission date for modal
+      setSubmissionDate(formatDateOnly(new Date().toISOString()));
       // ✅ selesai submit -> keluar dari mode edit draft
       sessionStorage.removeItem("iss_edit_draft_id");
       sessionStorage.removeItem("iss_edit_draft_mode");
       alert("Laporan cedera berhasil diajukan!");
-      onNavigate("dashboard");
+      
+      // Navigate to appropriate dashboard based on user role
+      if (profile?.role === "admin_nasional") {
+        onNavigate("dashboard-national");
+      } else if (profile?.role === "admin_daerah") {
+        onNavigate("dashboard-regional");
+      } else {
+        onNavigate("dashboard-coach");
+      }
     } catch {
       // errorMsg sudah di-set
     }
@@ -473,8 +551,16 @@ export function InputCederaPage({
 
   const result = currentStep === 4 ? calculateSeverityAndRecommendations() : null;
 
-  const currentActivityTypes = userRole === "coach" ? activityTypes.coach : activityTypes.regional;
-  const currentActivityContexts = userRole === "coach" ? activityContexts.coach : activityContexts.regional;
+  const currentActivityTypes = userRole === "coach" 
+    ? activityTypes.coach 
+    : userRole === "national" 
+    ? activityTypes.national 
+    : activityTypes.regional;
+  const currentActivityContexts = userRole === "coach" 
+    ? activityContexts.coach 
+    : userRole === "national" 
+    ? activityContexts.national 
+    : activityContexts.regional;
 
   const disabledAll = saving || loadingDraft || loadingProfile || !user;
 
@@ -520,16 +606,17 @@ export function InputCederaPage({
         return map[formData.painLevel] ?? (formData.painLevel || "-");
       })(),
       redFlags: Array.isArray(formData.redFlags) ? formData.redFlags : [],
+      severityLevel: calculateSeverityLevel(formData.movementAbility, formData.painLevel, formData.redFlags),
       status: reportStatus === "submitted" ? "Menunggu Verifikasi" : "Draft",
-      tanggalLapor: undefined,
+      tanggalLapor: submissionDate,
       tanggalVerifikasi: undefined,
       verifikator: undefined,
-      pelapor: {
-        nama: user?.user_metadata?.full_name || user?.email || "-",
-        wilayah: user?.user_metadata?.region || "-",
+      pelapor: pelaporData || {
+        nama: "-",
+        wilayah: "-",
       },
     };
-  }, [editingDraftId, formData, reportStatus, user]);
+  }, [editingDraftId, formData, reportStatus, pelaporData, submissionDate]);
 
   return (
     <div className="min-h-screen bg-gray-50 lg:pl-64">
@@ -948,13 +1035,31 @@ export function InputCederaPage({
               <div className="flex items-center justify-center py-4">
                 <div
                   className={`inline-flex items-center gap-3 px-8 py-4 rounded-xl border-2 ${
-                    result.severity === "BERAT" ? "bg-red-50 border-red-600" : "bg-green-50 border-green-600"
+                    result.severity === "BERAT" 
+                      ? "bg-red-50 border-red-600" 
+                      : result.severity === "SEDANG"
+                      ? "bg-yellow-50 border-yellow-600"
+                      : "bg-green-50 border-green-600"
                   }`}
                 >
-                  {result.severity === "BERAT" ? <AlertTriangle className="w-7 h-7 text-red-600" /> : <CheckCircle className="w-7 h-7 text-green-600" />}
+                  {result.severity === "BERAT" ? (
+                    <AlertTriangle className="w-7 h-7 text-red-600" />
+                  ) : result.severity === "SEDANG" ? (
+                    <AlertTriangle className="w-7 h-7 text-yellow-600" />
+                  ) : (
+                    <CheckCircle className="w-7 h-7 text-green-600" />
+                  )}
                   <div className="text-center">
                     <p className="text-xs text-gray-600 mb-1">Tingkat Cedera</p>
-                    <p className={`text-2xl ${result.severity === "BERAT" ? "text-red-600" : "text-green-600"}`}>{result.severity}</p>
+                    <p className={`text-2xl ${
+                      result.severity === "BERAT" 
+                        ? "text-red-600" 
+                        : result.severity === "SEDANG"
+                        ? "text-yellow-600"
+                        : "text-green-600"
+                    }`}>
+                      {result.severity}
+                    </p>
                   </div>
                 </div>
               </div>

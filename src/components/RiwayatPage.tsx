@@ -10,8 +10,9 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { useAuth } from "../contexts/auth-context";
 import { ModalRingkasanData, LaporanData } from "./ModalRingkasanData";
+import { fetchPelaporData, formatDateOnly } from "../lib/injury-helpers";
 
 interface RiwayatPageProps {
   onNavigate: (page: string) => void;
@@ -42,6 +43,7 @@ type InjuryReportRow = {
   movement_ability: string;
   pain_level: string;
   red_flags: string[];
+  severity_level: string | null;
   status: "draft" | "submitted" | "verified" | "rejected";
   verified_by: string | null;
   verified_at: string | null;
@@ -51,10 +53,18 @@ type InjuryReportRow = {
 
 export function RiwayatPage({
   onNavigate,
-  userRole = "coach",
+  userRole: userRoleProp,
   onLogout,
 }: Omit<RiwayatPageProps, "userName">) {
-  const { user, loadingProfile } = useAuth();
+  const { user, loadingProfile, profile } = useAuth();
+
+  // ✅ Derive userRole from profile instead of relying on prop
+  const userRole: "coach" | "regional" | "national" = useMemo(() => {
+    if (!profile?.role) return "coach";
+    if (profile.role === "admin_nasional") return "national";
+    if (profile.role === "admin_daerah") return "regional";
+    return "coach";
+  }, [profile?.role]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -71,13 +81,11 @@ export function RiwayatPage({
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // Map userRole to format expected by PrivateSidebar
-  const mappedRole =
-    userRole === "coach"
-      ? "pelatih"
-      : userRole === "regional"
-      ? "admin_daerah"
-      : "admin_nasional";
+  // Map profile.role to format expected by PrivateSidebar
+  const mappedRole = useMemo(() => {
+    if (!profile?.role) return "pelatih";
+    return profile.role;
+  }, [profile?.role]);
 
   // ✅ onLogout wajib function utk PrivateSidebar
   const handleLogout = () => {
@@ -130,7 +138,10 @@ export function RiwayatPage({
     return map[pain] ?? pain;
   };
 
-  const toModalData = (r: InjuryReportRow): LaporanData => {
+  const toModalData = async (r: InjuryReportRow): Promise<LaporanData> => {
+    // Fetch pelapor data using unified helper
+    const pelapor = await fetchPelaporData(r.user_id);
+    
     return {
       id: String(r.id), // ✅ modal minta string
       namaAtlet: r.athlete_name,
@@ -149,14 +160,12 @@ export function RiwayatPage({
       kemampuanGerak: displayMovement(r.movement_ability),
       tingkatNyeri: displayPain(r.pain_level),
       redFlags: Array.isArray(r.red_flags) ? r.red_flags : [],
+      severityLevel: r.severity_level || undefined,
       status: statusLabel(r),
-      tanggalLapor: r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : undefined,
-      tanggalVerifikasi: r.verified_at ? new Date(r.verified_at).toISOString().slice(0, 10) : undefined,
+      tanggalLapor: formatDateOnly(r.created_at),
+      tanggalVerifikasi: formatDateOnly(r.verified_at),
       verifikator: r.verified_by ?? undefined,
-      pelapor: {
-        nama: user?.user_metadata?.full_name || user?.email || "",
-        wilayah: user?.user_metadata?.region || "",
-      },
+      pelapor,
     };
   };
 
@@ -173,7 +182,7 @@ export function RiwayatPage({
       const { data, error } = await supabase
         .from("injury_reports")
         .select(
-          "id,user_id,athlete_name,gender,age,injury_date,activity_type,activity_type_other,activity_context,activity_context_other,injury_count,injuries,movement_ability,pain_level,red_flags,status,verified_by,verified_at,created_at,updated_at"
+          "id,user_id,athlete_name,gender,age,injury_date,activity_type,activity_type_other,activity_context,activity_context_other,injury_count,injuries,movement_ability,pain_level,red_flags,severity_level,status,verified_by,verified_at,created_at,updated_at"
         )
         .eq("user_id", user.id)
         .neq("status", "draft") // ✅ semua yang sudah diajukan
@@ -417,8 +426,9 @@ export function RiwayatPage({
                       <td className="px-6 py-4">
                         <button
                           className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm"
-                          onClick={() => {
-                            setSelectedData(toModalData(r));
+                          onClick={async () => {
+                            const data = await toModalData(r);
+                            setSelectedData(data);
                             setShowDetailModal(true);
                           }}
                         >

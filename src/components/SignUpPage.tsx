@@ -4,6 +4,8 @@ import Image from "next/image";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Eye, EyeOff, MailCheck } from "lucide-react";
+import { PROVINSI_INDONESIA } from "../lib/constants";
+import { validatePassword, getPasswordRequirements } from "../lib/password-validation";
 
 interface SignUpPageProps {
   onNavigate: (page: string) => void;
@@ -30,7 +32,7 @@ export function SignUpPage({ onNavigate }: SignUpPageProps) {
     message: string;
   } | null>(null);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData((p) => ({ ...p, [name]: value }));
     setErrors((prev) => {
@@ -67,9 +69,12 @@ export function SignUpPage({ onNavigate }: SignUpPageProps) {
     if (!formData.password) {
       setErrors((prev) => ({ ...prev, password: "Kata sandi wajib diisi." }));
       hasError = true;
-    } else if (formData.password.length < 8) {
-      setErrors((prev) => ({ ...prev, password: "Password minimal 8 karakter." }));
-      hasError = true;
+    } else {
+      const passwordCheck = validatePassword(formData.password);
+      if (!passwordCheck.isValid) {
+        setErrors((prev) => ({ ...prev, password: passwordCheck.errors.join(". ") }));
+        hasError = true;
+      }
     }
     if (!formData.confirmPassword) {
       setErrors((prev) => ({ ...prev, confirmPassword: "Konfirmasi kata sandi wajib diisi." }));
@@ -226,25 +231,30 @@ export function SignUpPage({ onNavigate }: SignUpPageProps) {
             />
             {errors.privateToken && <p className="text-red-500 text-xs mt-1">{errors.privateToken}</p>}
             <p className="text-xs text-gray-500 mt-1">
-              Token hanya menentukan <strong>role</strong>. Wilayah diisi dari input pengguna (jika ada).
+              Token hanya menentukan <strong>role</strong>. Provinsi dipilih dari dropdown.
             </p>
           </div>
 
           {/* Wilayah (optional) */}
           <div>
             <label htmlFor="wilayah" className="block text-sm mb-2 text-gray-700">
-              Wilayah (Opsional)
+              Provinsi (Opsional)
             </label>
-            <input
+            <select
               id="wilayah"
               name="wilayah"
-              type="text"
               value={formData.wilayah}
               onChange={handleChange}
               className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 border-gray-300"
-              placeholder="Contoh: DIY / Jakarta / Jawa Barat"
               disabled={loading}
-            />
+            >
+              <option value="">-- Pilih Provinsi --</option>
+              {PROVINSI_INDONESIA.map((provinsi) => (
+                <option key={provinsi} value={provinsi}>
+                  {provinsi}
+                </option>
+              ))}
+            </select>
             <p className="text-xs text-gray-500 mt-1">Jika kosong, bisa diisi nanti di profil.</p>
           </div>
 
@@ -301,6 +311,13 @@ export function SignUpPage({ onNavigate }: SignUpPageProps) {
               </button>
             </div>
             {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
+            {!errors.password && (
+              <ul className="text-xs text-gray-500 mt-1 space-y-0.5">
+                {getPasswordRequirements().map((req, i) => (
+                  <li key={i}>• {req}</li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div>

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { PrivateSidebar } from "./PrivateSidebar";
 import { supabase } from "../lib/supabase"; // pastikan path sesuai punyamu
+import { useAuth } from "../contexts/auth-context";
+import { toast } from "sonner";
 import { Menu, Key, Calendar, Copy, Check, ChevronLeft, ChevronRight } from "lucide-react";
 
 type Role = "pelatih" | "admin_daerah" | "admin_nasional";
@@ -80,6 +82,8 @@ async function authedFetch(input: RequestInfo | URL, init?: RequestInit) {
 }
 
 function TokenGenerator({ onNavigate }: TokenGeneratorProps) {
+  const { user, profile, loadingProfile } = useAuth();
+  
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [tokenValidDays, setTokenValidDays] = useState(7);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
@@ -94,8 +98,6 @@ function TokenGenerator({ onNavigate }: TokenGeneratorProps) {
     admin_nasional: null,
   });
 
-  const [whoami, setWhoami] = useState<{ userId: string; userRole: string } | null>(null);
-
   const itemsPerPage = 10;
 
   const roleCards = useMemo(
@@ -106,6 +108,23 @@ function TokenGenerator({ onNavigate }: TokenGeneratorProps) {
     ],
     []
   );
+
+  // ✅ Access control - only admin nasional can access this page
+  useEffect(() => {
+    if (loadingProfile) return;
+    
+    if (!profile) {
+      toast.error('Anda harus login terlebih dahulu');
+      onNavigate('login');
+      return;
+    }
+
+    if (profile.role !== 'admin_nasional') {
+      toast.error('Akses ditolak. Halaman ini hanya untuk Admin Nasional.');
+      onNavigate('dashboard');
+      return;
+    }
+  }, [loadingProfile, profile, onNavigate]);
 
   const refreshHistory = async () => {
     const res = await authedFetch("/api/token", { method: "GET" });
@@ -130,24 +149,12 @@ function TokenGenerator({ onNavigate }: TokenGeneratorProps) {
     }
   };
 
-  // cek siapa user login + role (untuk gating UI)
-  const loadWhoAmI = async () => {
-    const { data } = await supabase.auth.getSession();
-    const userId = data.session?.user?.id ?? "";
-    if (!userId) {
-      setWhoami(null);
-      return;
-    }
-
-    // Ambil role dari profiles (client-side) — kalau RLS profiles kamu mengizinkan self-read.
-    // Kalau tidak, kita bisa buat endpoint /api/me. Tapi coba dulu ini.
-    const { data: prof } = await supabase.from("profiles").select("id, role").eq("id", userId).maybeSingle();
-    setWhoami({ userId, userRole: String(prof?.role ?? "") });
-  };
-
   useEffect(() => {
-    loadWhoAmI().then(() => refreshHistory());
-  }, []);
+    if (loadingProfile) return;
+    if (!profile || profile.role !== 'admin_nasional') return;
+    
+    refreshHistory();
+  }, [loadingProfile, profile]);
 
   useEffect(() => {
     const pages = Math.max(1, Math.ceil(tokenHistory.length / itemsPerPage));
@@ -192,30 +199,28 @@ function TokenGenerator({ onNavigate }: TokenGeneratorProps) {
     setTimeout(() => setCopiedToken(null), 2000);
   };
 
+  const handleLogout = () => {
+    onNavigate("logout");
+  };
+
   // Pagination
   const totalPages = Math.max(1, Math.ceil(tokenHistory.length / itemsPerPage));
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentTokens = tokenHistory.slice(indexOfFirstItem, indexOfLastItem);
 
-  // ✅ UI guard (meski server juga sudah guard)
-  if (whoami && whoami.userRole !== "admin_nasional") {
+  // Show loading while checking access
+  if (loadingProfile) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="bg-white border rounded-lg p-6 max-w-md w-full">
-          <h2 className="text-lg font-semibold mb-2">Akses Ditolak</h2>
-          <p className="text-sm text-gray-600">
-            Halaman Token Generator hanya bisa diakses oleh <b>Admin Nasional</b>.
-          </p>
-          <button
-            onClick={() => onNavigate("dashboard")}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg"
-          >
-            Kembali
-          </button>
-        </div>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
+  }
+
+  // Don't render if not authorized
+  if (!profile || profile.role !== 'admin_nasional') {
+    return null;
   }
 
   return (
@@ -224,10 +229,9 @@ function TokenGenerator({ onNavigate }: TokenGeneratorProps) {
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         onNavigate={onNavigate}
-        onLogout={() => onNavigate("logout")}
+        onLogout={handleLogout}
         currentPage="token-generator"
         userRole="admin_nasional"
-        // userName removed
       />
 
       <header className="bg-white border-b border-gray-200 sticky top-0 z-30">

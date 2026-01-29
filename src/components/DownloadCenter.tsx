@@ -1,18 +1,411 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { PrivateSidebar } from './PrivateSidebar';
 import { Menu, Download, FileSpreadsheet, Table, BarChart3, Filter, Calendar, FileText, FileDown } from 'lucide-react';
+import { useAuth } from '../contexts/auth-context';
+import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
+import { supabase } from '../lib/supabase';
+import JSZip from 'jszip';
+import html2canvas from 'html2canvas';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  PointElement,
+  LineElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+import { Bar, Pie, Line } from 'react-chartjs-2';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  PointElement,
+  LineElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend
+);
+
+// Helper functions for Excel/CSV export
+function toCsvAndDownload(rows: any[], filename: string) {
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const csv = XLSX.utils.sheet_to_csv(ws);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function toXlsxAndDownload(sheets: { name: string; rows: any[] }[], filename: string) {
+  const wb = XLSX.utils.book_new();
+  
+  for (const s of sheets) {
+    const ws = XLSX.utils.json_to_sheet(s.rows);
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    
+    // Apply styling to all cells
+    for (let row = range.s.r; row <= range.e.r; row++) {
+      for (let col = range.s.c; col <= range.e.c; col++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+        if (!ws[cellAddress]) ws[cellAddress] = { t: 's', v: '' };
+        
+        const cellValue = String(ws[cellAddress].v || '');
+        const isHeaderRow = row === 0;
+        const isSectionHeader = cellValue.includes('RINGKASAN') || cellValue.includes('JENIS') || 
+                                cellValue.includes('MEKANISME') || cellValue.includes('LOKASI') || 
+                                cellValue.includes('DERAJAT');
+        const isEvenRow = row % 2 === 0;
+        const isTotalColumn = col === range.e.c; // Last column (Total)
+        
+        // Initialize cell style
+        if (!ws[cellAddress].s) ws[cellAddress].s = {};
+        
+        // Header row styling (first row - column headers)
+        if (isHeaderRow) {
+          ws[cellAddress].s = {
+            fill: { fgColor: { rgb: "1E40AF" } }, // Dark blue background
+            font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 }, // White bold text
+            alignment: { horizontal: "center", vertical: "center", wrapText: true },
+            border: {
+              top: { style: "medium", color: { rgb: "000000" } },
+              bottom: { style: "medium", color: { rgb: "000000" } },
+              left: { style: "thin", color: { rgb: "000000" } },
+              right: { style: "thin", color: { rgb: "000000" } },
+            },
+          };
+        }
+        // Section headers (RINGKASAN, JENIS CEDERA, etc.)
+        else if (isSectionHeader) {
+          ws[cellAddress].s = {
+            fill: { fgColor: { rgb: "DBEAFE" } }, // Light blue background
+            font: { bold: true, color: { rgb: "1E3A8A" }, sz: 10 }, // Dark blue bold text
+            alignment: { horizontal: "left", vertical: "center" },
+            border: {
+              top: { style: "medium", color: { rgb: "3B82F6" } },
+              bottom: { style: "thin", color: { rgb: "3B82F6" } },
+              left: { style: "thin", color: { rgb: "D1D5DB" } },
+              right: { style: "thin", color: { rgb: "D1D5DB" } },
+            },
+          };
+        }
+        // Total column styling
+        else if (isTotalColumn && !isSectionHeader && cellValue !== '') {
+          ws[cellAddress].s = {
+            fill: { fgColor: { rgb: isEvenRow ? "F3F4F6" : "FFFFFF" } },
+            font: { bold: true, color: { rgb: "1F2937" } },
+            alignment: { horizontal: "center", vertical: "center" },
+            border: {
+              top: { style: "thin", color: { rgb: "D1D5DB" } },
+              bottom: { style: "thin", color: { rgb: "D1D5DB" } },
+              left: { style: "medium", color: { rgb: "9CA3AF" } },
+              right: { style: "thin", color: { rgb: "D1D5DB" } },
+            },
+          };
+        }
+        // Regular data rows (zebra striping)
+        else {
+          ws[cellAddress].s = {
+            fill: { fgColor: { rgb: isEvenRow ? "F9FAFB" : "FFFFFF" } },
+            font: { color: { rgb: "374151" } },
+            alignment: { 
+              horizontal: col === 0 ? "left" : "center", 
+              vertical: "center" 
+            },
+            border: {
+              top: { style: "thin", color: { rgb: "E5E7EB" } },
+              bottom: { style: "thin", color: { rgb: "E5E7EB" } },
+              left: { style: "thin", color: { rgb: "E5E7EB" } },
+              right: { style: "thin", color: { rgb: "E5E7EB" } },
+            },
+          };
+        }
+      }
+    }
+    
+    // Set column widths
+    const colWidths = [];
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      let maxWidth = 10;
+      for (let row = range.s.r; row <= range.e.r; row++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+        if (ws[cellAddress] && ws[cellAddress].v) {
+          const cellValue = String(ws[cellAddress].v);
+          maxWidth = Math.max(maxWidth, cellValue.length);
+        }
+      }
+      // First column (Kategori) should be wider
+      const width = col === 0 ? Math.min(maxWidth + 4, 60) : Math.min(maxWidth + 2, 20);
+      colWidths.push({ wch: width });
+    }
+    ws['!cols'] = colWidths;
+    
+    // Set row heights
+    ws['!rows'] = Array(range.e.r + 1).fill({ hpt: 18 });
+    ws['!rows'][0] = { hpt: 24 }; // Header row taller
+    
+    XLSX.utils.book_append_sheet(wb, ws, s.name);
+  }
+  
+  XLSX.writeFile(wb, filename);
+}
+
+function addMonths(d: Date, months: number) {
+  const x = new Date(d);
+  x.setMonth(x.getMonth() + months);
+  return x;
+}
+
+function formatDateISO(d: Date) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function getDateRange(
+  periodeFilter: "6bulan" | "1tahun" | "tahun" | "custom",
+  selectedYear: string,
+  customStartDate: string,
+  customEndDate: string
+) {
+  const today = new Date();
+  if (periodeFilter === "6bulan") {
+    return { start: formatDateISO(addMonths(today, -6)), end: formatDateISO(today) };
+  }
+  if (periodeFilter === "1tahun") {
+    const y = Number(selectedYear || today.getFullYear());
+    return { start: `${y}-01-01`, end: `${y}-12-31` };
+  }
+  if (periodeFilter === "tahun") {
+    return { start: `${selectedYear}-01-01`, end: `${selectedYear}-12-31` };
+  }
+  return { start: customStartDate, end: customEndDate };
+}
+
+// Fetch raw data (wide format)
+async function fetchRawWide(start: string, end: string) {
+  const { data, error } = await supabase
+    .from("injury_reports")
+    .select(`
+      id, user_id, athlete_name, gender, age, injury_date,
+      activity_type, activity_context,
+      injury_count, injuries,
+      movement_ability, pain_level,
+      red_flags, status,
+      verified_by, verified_at,
+      created_at, updated_at
+    `)
+    .eq("status", "verified")
+    .gte("injury_date", start)
+    .lte("injury_date", end)
+    .order("injury_date", { ascending: true });
+
+  if (error) throw error;
+  
+  // Flatten JSONB fields for better readability
+  const flattened = (data ?? []).map(row => {
+    const flatRow: any = { ...row };
+    
+    // Flatten injuries array
+    if (row.injuries && Array.isArray(row.injuries)) {
+      // Create separate columns for each injury
+      row.injuries.forEach((injury: any, index: number) => {
+        const prefix = `injury_${index + 1}`;
+        flatRow[`${prefix}_location`] = injury.location || '';
+        flatRow[`${prefix}_mechanism`] = injury.mechanism || '';
+      });
+      
+      // Also keep a summary string
+      flatRow.injuries_summary = row.injuries
+        .map((inj: any) => `${inj.location || 'N/A'} - ${inj.mechanism || 'N/A'}`)
+        .join('; ');
+      
+      delete flatRow.injuries; // Remove original JSON field
+    } else {
+      flatRow.injuries_summary = '';
+    }
+    
+    // Flatten red_flags array
+    if (row.red_flags && Array.isArray(row.red_flags)) {
+      flatRow.red_flags_list = row.red_flags.join(', ');
+      flatRow.red_flags_count = row.red_flags.length;
+      delete flatRow.red_flags; // Remove original JSON field
+    } else {
+      flatRow.red_flags_list = '';
+      flatRow.red_flags_count = 0;
+    }
+    
+    return flatRow;
+  });
+  
+  return flattened;
+}
+
+// Convert wide to long format
+function wideToLong(rows: any[]) {
+  const long: any[] = [];
+  for (const r of rows) {
+    for (const [key, value] of Object.entries(r)) {
+      long.push({
+        report_id: r.id,
+        injury_date: r.injury_date,
+        variable: key,
+        value: typeof value === "object" ? JSON.stringify(value) : value,
+      });
+    }
+  }
+  return long;
+}
+
+// Fetch crosstab data (following VisualisasiData format: Training vs Competition)
+async function fetchCrosstabs(start: string, end: string) {
+  const [
+    summary,
+    byLocation,
+    byType,
+    byMechanism,
+    bySeverity,
+  ] = await Promise.all([
+    (supabase.rpc as any)("analytics_crosstab_summary", { start_date: start, end_date: end }),
+    (supabase.rpc as any)("analytics_crosstab_by_location", { start_date: start, end_date: end, top_n: 9999 }),
+    (supabase.rpc as any)("analytics_crosstab_by_injury_type", { start_date: start, end_date: end, top_n: 9999 }),
+    (supabase.rpc as any)("analytics_crosstab_by_mechanism", { start_date: start, end_date: end, top_n: 9999 }),
+    (supabase.rpc as any)("analytics_crosstab_by_severity", { start_date: start, end_date: end }),
+  ]);
+
+  const anyError = summary.error || byLocation.error || byType.error || byMechanism.error || bySeverity.error;
+
+  if (anyError) throw (anyError as any);
+
+  return {
+    summary: summary.data ?? [],
+    byLocation: byLocation.data ?? [],
+    byType: byType.data ?? [],
+    byMechanism: byMechanism.data ?? [],
+    bySeverity: bySeverity.data ?? [],
+  };
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function monthKey(d: string) {
+  return d.slice(0, 7); // YYYY-MM
+}
+
+function labelMonth(yyyyMM: string) {
+  const [y, m] = yyyyMM.split("-");
+  const monthNames = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+  return `${monthNames[Math.max(0, Number(m) - 1)]} ${y}`;
+}
+
+async function fetchVerifiedForAggregation(start: string, end: string) {
+  const { data, error } = await supabase
+    .from("injury_reports")
+    .select("id, user_id, injury_date, severity_level, status")
+    .eq("status", "verified")
+    .gte("injury_date", start)
+    .lte("injury_date", end);
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+async function fetchProfilesMap(userIds: string[]) {
+  const unique = Array.from(new Set(userIds)).filter(Boolean);
+  if (unique.length === 0) return new Map<string, string>();
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, wilayah")
+    .in("id", unique);
+
+  if (error) throw error;
+
+  const m = new Map<string, string>();
+  for (const p of data ?? []) {
+    m.set(p.id, p.wilayah ?? "Tidak diketahui");
+  }
+  return m;
+}
+
+function groupMonthlyByWilayah(rows: any[], idToWilayah: Map<string, string>) {
+  const months = Array.from(new Set(rows.map(r => monthKey(r.injury_date)))).sort();
+  const wilayahSet = new Set<string>();
+  const counts = new Map<string, Map<string, number>>();
+
+  for (const r of rows) {
+    const w = idToWilayah.get(r.user_id) ?? "Tidak diketahui";
+    wilayahSet.add(w);
+    const mk = monthKey(r.injury_date);
+
+    if (!counts.has(w)) counts.set(w, new Map());
+    const m = counts.get(w)!;
+    m.set(mk, (m.get(mk) ?? 0) + 1);
+  }
+
+  const wilayahList = Array.from(wilayahSet).sort();
+  const datasets = wilayahList.map(w => ({
+    label: w,
+    data: months.map(mk => counts.get(w)?.get(mk) ?? 0),
+  }));
+
+  return { months, monthLabels: months.map(labelMonth), datasets };
+}
+
+function groupSeverityByWilayah(rows: any[], idToWilayah: Map<string, string>) {
+  const severities = ["Ringan", "Sedang", "Berat", "Lainnya"];
+  const wilayahSet = new Set<string>();
+  const counts = new Map<string, Map<string, number>>();
+
+  for (const r of rows) {
+    const w = idToWilayah.get(r.user_id) ?? "Tidak diketahui";
+    wilayahSet.add(w);
+
+    const sevRaw = (r.severity_level ?? "").toString().toLowerCase();
+    let sev = "Lainnya";
+    if (sevRaw === "ringan") sev = "Ringan";
+    else if (sevRaw === "sedang") sev = "Sedang";
+    else if (sevRaw === "berat") sev = "Berat";
+
+    if (!counts.has(w)) counts.set(w, new Map());
+    const m = counts.get(w)!;
+    m.set(sev, (m.get(sev) ?? 0) + 1);
+  }
+
+  const wilayahList = Array.from(wilayahSet).sort();
+  const datasets = severities.map(sev => ({
+    label: sev,
+    data: wilayahList.map(w => counts.get(w)?.get(sev) ?? 0),
+  }));
+
+  return { wilayahList, severities, datasets };
+}
 
 interface DownloadCenterProps {
   onNavigate: (page: string) => void;
-  userRole?: 'pelatih' | 'admin_daerah' | 'admin_nasional';
-  userWilayah?: string;
 }
 
 export function DownloadCenter({ 
-  onNavigate, 
-  userRole = 'admin_nasional',
-  userWilayah = 'DKI Jakarta'
+  onNavigate
 }: DownloadCenterProps) {
+  const { profile, loadingProfile } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [periodeFilter, setPeriodeFilter] = useState<'6bulan' | '1tahun' | 'tahun' | 'custom'>('6bulan');
   const [selectedYear, setSelectedYear] = useState('2024');
@@ -21,12 +414,37 @@ export function DownloadCenter({
   const [formatData, setFormatData] = useState<'wide' | 'long'>('wide');
   const [selectedCrosstab, setSelectedCrosstab] = useState('derajat-wilayah');
   const [selectedChart, setSelectedChart] = useState('bar-bulan');
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  // Untuk mode export (render chart off-screen)
+  const [exportPayload, setExportPayload] = useState<any | null>(null);
+  const exportRef = useMemo(() => ({ current: null as HTMLDivElement | null }), []);
 
   const handleLogout = () => {
     onNavigate('logout');
   };
 
+  // Get role and region from profile
+  const userRole = useMemo(() => profile?.role || 'pelatih', [profile?.role]);
+  const userWilayah = useMemo(() => profile?.wilayah || 'DKI Jakarta', [profile?.wilayah]);
   const isNasional = userRole === 'admin_nasional';
+
+  // Access control - only admin nasional can access this page
+  useEffect(() => {
+    if (loadingProfile) return;
+    
+    if (!profile) {
+      toast.error('Anda harus login terlebih dahulu');
+      onNavigate('login');
+      return;
+    }
+
+    if (profile.role !== 'admin_nasional') {
+      toast.error('Akses ditolak. Halaman ini hanya untuk Admin Nasional.');
+      onNavigate('dashboard');
+      return;
+    }
+  }, [loadingProfile, profile, onNavigate]);
 
   const getPeriodLabel = () => {
     if (periodeFilter === '6bulan') return '6 Bulan Terakhir';
@@ -36,11 +454,248 @@ export function DownloadCenter({
     return '6 Bulan Terakhir';
   };
 
-  const handleDownload = (type: string) => {
-    // Simulasi download
-    console.log(`Downloading ${type} - ${getPeriodLabel()} - Format: ${formatData}`);
-    alert(`Download ${type} dimulai!\nPeriode: ${getPeriodLabel()}\nFormat: ${formatData === 'wide' ? 'Wide Format' : 'Long Format'}`);
+  const exportChartsZip = async (start: string, end: string, isNasional: boolean) => {
+    // 1) ambil data chart berbasis RPC yang sudah ada
+    const [monthly, pie, topLok, topAkt] = await Promise.all([
+      (supabase.rpc as any)("analytics_monthly_counts", { start_date: start, end_date: end }),
+      (supabase.rpc as any)("analytics_severity_pie", { start_date: start, end_date: end }),
+      (supabase.rpc as any)("analytics_top_locations", { start_date: start, end_date: end, top_n: 10 }),
+      (supabase.rpc as any)("analytics_top_activities", { start_date: start, end_date: end, top_n: 10 }),
+    ]);
+
+    const anyErr = monthly.error || pie.error || topLok.error || topAkt.error;
+    if (anyErr) throw anyErr;
+
+    // 2) untuk nasional: agregasi wilayah via raw query
+    let wilayahMonthly: any = null;
+    let severityWilayah: any = null;
+
+    if (isNasional) {
+      const rows = await fetchVerifiedForAggregation(start, end);
+      const idMap = await fetchProfilesMap(rows.map(r => r.user_id));
+      wilayahMonthly = groupMonthlyByWilayah(rows, idMap);
+      severityWilayah = groupSeverityByWilayah(rows, idMap);
+    }
+
+    // 3) set payload -> render offscreen
+    setExportPayload({
+      start, end,
+      monthly: monthly.data ?? [],
+      pie: pie.data ?? [],
+      topLok: topLok.data ?? [],
+      topAkt: topAkt.data ?? [],
+      wilayahMonthly,
+      severityWilayah,
+      isNasional,
+    });
+
+    // 4) tunggu render 2 frame
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    // 5) capture PNG per chart
+    if (!exportRef.current) throw new Error("Export container not ready");
+
+    const chartNodes = exportRef.current.querySelectorAll("[data-chart]");
+    const zip = new JSZip();
+
+    for (const node of Array.from(chartNodes)) {
+      const el = node as HTMLElement;
+      const name = el.getAttribute("data-chart") ?? "chart";
+      const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff" });
+      const blob: Blob | null = await new Promise(res => canvas.toBlob(res, "image/png"));
+      if (blob) zip.file(`${name}.png`, blob);
+    }
+
+    const zipBlob = await zip.generateAsync({ type: "blob" });
+    downloadBlob(zipBlob, `charts_${start}_to_${end}.zip`);
+
+    // cleanup
+    setExportPayload(null);
   };
+
+  const handleDownload = async (type: string) => {
+    try {
+      const { start, end } = getDateRange(periodeFilter, selectedYear, customStartDate, customEndDate);
+
+      if (periodeFilter === "custom" && (!start || !end)) {
+        toast.error("Isi tanggal start & end untuk custom range");
+        return;
+      }
+
+      setDownloading(type);
+      toast.loading(`Menyiapkan ${type}...`, { id: "dl" });
+
+      // 1) RAW DATA
+      if (type.startsWith("raw_excel") || type.startsWith("raw_csv")) {
+        const wide = await fetchRawWide(start, end);
+        const rows = formatData === "wide" ? wide : wideToLong(wide);
+
+        const label = `${start}_to_${end}_${formatData}`;
+        if (type === "raw_excel") {
+          toXlsxAndDownload([{ name: formatData.toUpperCase(), rows }], `raw_${label}.xlsx`);
+        } else {
+          toCsvAndDownload(rows, `raw_${label}.csv`);
+        }
+
+        toast.success("Download dimulai", { id: "dl" });
+        return;
+      }
+
+      // 2) CROSSTAB
+      if (type === "crosstab_excel" || type === "crosstab_csv") {
+        const c = await fetchCrosstabs(start, end);
+
+        // Format crosstab data untuk export (Training vs Competition format)
+        const crosstabRows: any[] = [];
+        
+        // Header section
+        crosstabRows.push({
+          Kategori: "RINGKASAN DATA CEDERA",
+          Training: "",
+          Competition: "",
+          Total: "",
+        });
+        
+        // Summary data (Atlet & Cedera)
+        const atletRow = c.summary.find((r: any) => r.kategori === "Atlet");
+        const cederaRow = c.summary.find((r: any) => r.kategori === "Cedera");
+        
+        crosstabRows.push({
+          Kategori: "Atlet",
+          Training: atletRow?.training || 0,
+          Competition: atletRow?.competition || 0,
+          Total: atletRow?.total || 0,
+        });
+        
+        crosstabRows.push({
+          Kategori: "Cedera",
+          Training: cederaRow?.training || 0,
+          Competition: cederaRow?.competition || 0,
+          Total: cederaRow?.total || 0,
+        });
+        
+        // Empty row separator
+        crosstabRows.push({ Kategori: "", Training: "", Competition: "", Total: "" });
+        
+        // Jenis Cedera section
+        crosstabRows.push({
+          Kategori: "JENIS CEDERA",
+          Training: "",
+          Competition: "",
+          Total: "",
+        });
+        
+        c.byType.forEach((row: any) => {
+          crosstabRows.push({
+            Kategori: `  ${row.kategori}`,
+            Training: row.training,
+            Competition: row.competition,
+            Total: row.total,
+          });
+        });
+        
+        // Empty row separator
+        crosstabRows.push({ Kategori: "", Training: "", Competition: "", Total: "" });
+        
+        // Mekanisme Cedera section
+        crosstabRows.push({
+          Kategori: "MEKANISME CEDERA",
+          Training: "",
+          Competition: "",
+          Total: "",
+        });
+        
+        c.byMechanism.forEach((row: any) => {
+          crosstabRows.push({
+            Kategori: `  ${row.kategori}`,
+            Training: row.training,
+            Competition: row.competition,
+            Total: row.total,
+          });
+        });
+        
+        // Empty row separator
+        crosstabRows.push({ Kategori: "", Training: "", Competition: "", Total: "" });
+        
+        // Lokasi Cedera section
+        crosstabRows.push({
+          Kategori: "LOKASI CEDERA",
+          Training: "",
+          Competition: "",
+          Total: "",
+        });
+        
+        c.byLocation.forEach((row: any) => {
+          crosstabRows.push({
+            Kategori: `  ${row.kategori}`,
+            Training: row.training,
+            Competition: row.competition,
+            Total: row.total,
+          });
+        });
+        
+        // Empty row separator
+        crosstabRows.push({ Kategori: "", Training: "", Competition: "", Total: "" });
+        
+        // Derajat Cedera section
+        crosstabRows.push({
+          Kategori: "DERAJAT CEDERA",
+          Training: "",
+          Competition: "",
+          Total: "",
+        });
+        
+        c.bySeverity.forEach((row: any) => {
+          crosstabRows.push({
+            Kategori: `  ${row.kategori}`,
+            Training: row.training,
+            Competition: row.competition,
+            Total: row.total,
+          });
+        });
+
+        if (type === "crosstab_excel") {
+          toXlsxAndDownload(
+            [{ name: "Crosstabulasi", rows: crosstabRows }],
+            `crosstab_${start}_to_${end}.xlsx`
+          );
+        } else {
+          toCsvAndDownload(crosstabRows, `crosstab_${start}_to_${end}.csv`);
+        }
+
+        toast.success("Download dimulai", { id: "dl" });
+        return;
+      }
+
+      // 3) PNG grafik
+      if (type === "charts_png") {
+        await exportChartsZip(start, end, isNasional);
+        toast.success("ZIP grafik berhasil dibuat", { id: "dl" });
+        return;
+      }
+
+      toast.error("Tipe download tidak dikenal", { id: "dl" });
+    } catch (e: any) {
+      console.error(e);
+      toast.error(`Gagal download: ${e?.message ?? "Unknown error"}`, { id: "dl" });
+    } finally {
+      setDownloading(null);
+    }
+  };
+
+  // Show loading while checking access
+  if (loadingProfile) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  // Don't render if not authorized
+  if (!profile || profile.role !== 'admin_nasional') {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 lg:pl-64">
@@ -50,8 +705,7 @@ export function DownloadCenter({
         onNavigate={onNavigate}
         onLogout={handleLogout}
         currentPage="download-center"
-        userRole={userRole}
-        // userName removed
+        userRole="admin_nasional"
       />
 
       {/* Header */}
@@ -247,15 +901,11 @@ export function DownloadCenter({
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 bg-teal-600 rounded-full"></div>
-                  Lokasi & Jenis Cedera
+                  Lokasi & Jenis Cedera (Per Injury)
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 bg-teal-600 rounded-full"></div>
-                  Derajat Cedera
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 bg-teal-600 rounded-full"></div>
-                  Mekanisme Cedera
+                  Derajat & Mekanisme Cedera
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 bg-teal-600 rounded-full"></div>
@@ -263,15 +913,19 @@ export function DownloadCenter({
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 bg-teal-600 rounded-full"></div>
-                  Red Flags
+                  Red Flags (Comma-separated)
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 bg-teal-600 rounded-full"></div>
-                  Tanggal Kejadian
+                  Tanggal Kejadian & Verifikasi
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 bg-teal-600 rounded-full"></div>
-                  Data Pelapor
+                  Movement Ability & Pain Level
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 bg-teal-600 rounded-full"></div>
+                  Data Pelapor & Status
                 </div>
                 {isNasional && (
                   <div className="flex items-center gap-2">
@@ -280,23 +934,29 @@ export function DownloadCenter({
                   </div>
                 )}
               </div>
+              <div className="mt-3 text-xs text-gray-500 bg-gray-50 p-3 rounded">
+                <p><strong>Catatan:</strong> Data cedera (injuries) akan dipecah menjadi kolom terpisah per cedera. 
+                Red flags ditampilkan sebagai daftar yang dipisahkan koma untuk kemudahan membaca.</p>
+              </div>
             </div>
 
             {/* Download Buttons */}
             <div className="flex flex-wrap gap-3">
               <button
-                onClick={() => handleDownload(`Data Dasar ${formatData.toUpperCase()} - Excel`)}
-                className="flex items-center gap-2 px-6 py-3 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95"
+                onClick={() => handleDownload("raw_excel")}
+                disabled={downloading !== null}
+                className="flex items-center gap-2 px-6 py-3 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Download className="w-5 h-5" />
-                Download Excel (.xlsx)
+                {downloading === "raw_excel" ? "Menyiapkan..." : "Download Excel (.xlsx)"}
               </button>
               <button
-                onClick={() => handleDownload(`Data Dasar ${formatData.toUpperCase()} - CSV`)}
-                className="flex items-center gap-2 px-6 py-3 bg-white text-teal-600 border-2 border-teal-600 rounded-lg hover:bg-teal-50 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95"
+                onClick={() => handleDownload("raw_csv")}
+                disabled={downloading !== null}
+                className="flex items-center gap-2 px-6 py-3 bg-white text-teal-600 border-2 border-teal-600 rounded-lg hover:bg-teal-50 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Download className="w-5 h-5" />
-                Download CSV (.csv)
+                {downloading === "raw_csv" ? "Menyiapkan..." : "Download CSV (.csv)"}
               </button>
             </div>
           </div>
@@ -322,7 +982,7 @@ export function DownloadCenter({
               <p className="text-sm font-medium text-gray-900 mb-3">Tabel Crosstabulasi Lengkap</p>
               <p className="text-sm text-gray-600 mb-4">
                 Tabel ringkasan yang menampilkan breakdown lengkap data cedera berdasarkan jenis aktivitas (Training vs Competition), 
-                dengan detail jenis cedera, mekanisme, lokasi, dan derajat cedera.
+                dengan detail jenis cedera, mekanisme, lokasi, dan derajat cedera dalam satu file terstruktur.
               </p>
               
               {/* What's included */}
@@ -331,34 +991,34 @@ export function DownloadCenter({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-blue-800">
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                    Total atlet & cedera
+                    Total Atlet & Cedera (Training vs Competition)
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                    Jenis cedera (Sprain, Strain, Dislokasi, dll)
+                    Semua Jenis Cedera (Sprain, Strain, dll)
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                    Mekanisme cedera
+                    Semua Mekanisme Cedera
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                    Breakdown per aktivitas (Training/Competition)
+                    Semua Lokasi Cedera
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                    Lokasi cedera terbanyak
+                    Derajat Cedera (Ringan/Sedang/Berat)
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                    Derajat cedera (Ringan/Sedang/Berat)
+                    Data Agregat Lengkap (Tidak Dibatasi)
                   </div>
-                  {isNasional && (
-                    <div className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                      Breakdown per wilayah
-                    </div>
-                  )}
+                </div>
+                <div className="mt-3 pt-3 border-t border-blue-300">
+                  <p className="text-sm text-blue-900">
+                    <strong>Excel:</strong> Dilengkapi dengan styling (header berwarna, border, bold text) untuk kemudahan membaca.<br />
+                    <strong>CSV:</strong> Format plain text yang kompatibel dengan semua aplikasi spreadsheet.
+                  </p>
                 </div>
               </div>
             </div>
@@ -366,18 +1026,20 @@ export function DownloadCenter({
             {/* Download Buttons */}
             <div className="flex flex-wrap gap-3">
               <button
-                onClick={() => handleDownload('Tabel Crosstabulasi - Excel')}
-                className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95"
+                onClick={() => handleDownload("crosstab_excel")}
+                disabled={downloading !== null}
+                className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Download className="w-5 h-5" />
-                Download Excel (.xlsx)
+                {downloading === "crosstab_excel" ? "Menyiapkan..." : "Download Excel (.xlsx)"}
               </button>
               <button
-                onClick={() => handleDownload('Tabel Crosstabulasi - CSV')}
-                className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 border-2 border-blue-600 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95"
+                onClick={() => handleDownload("crosstab_csv")}
+                disabled={downloading !== null}
+                className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 border-2 border-blue-600 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Download className="w-5 h-5" />
-                Download CSV (.csv)
+                {downloading === "crosstab_csv" ? "Menyiapkan..." : "Download CSV (.csv)"}
               </button>
             </div>
           </div>
@@ -550,32 +1212,19 @@ export function DownloadCenter({
             <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6">
               <p className="text-sm text-purple-900">
                 <strong>Format:</strong> Semua grafik akan diexport dalam resolusi tinggi (High-Resolution PNG) 
-                dan format vektor (PDF) yang cocok untuk publikasi dan presentasi.
+                yang cocok untuk publikasi dan presentasi.
               </p>
             </div>
 
             {/* Download Buttons */}
             <div className="flex flex-wrap gap-3">
               <button
-                onClick={() => handleDownload('Semua Grafik - PNG')}
-                className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95"
+                onClick={() => handleDownload("charts_png")}
+                disabled={downloading !== null}
+                className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <FileDown className="w-5 h-5" />
-                Download PNG (High-Res)
-              </button>
-              <button
-                onClick={() => handleDownload('Semua Grafik - PDF')}
-                className="flex items-center gap-2 px-6 py-3 bg-white text-purple-600 border-2 border-purple-600 rounded-lg hover:bg-purple-50 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95"
-              >
-                <FileDown className="w-5 h-5" />
-                Download PDF (Vector)
-              </button>
-              <button
-                onClick={() => handleDownload('Semua Grafik - PowerPoint')}
-                className="flex items-center gap-2 px-6 py-3 bg-white text-purple-600 border-2 border-purple-600 rounded-lg hover:bg-purple-50 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95"
-              >
-                <FileDown className="w-5 h-5" />
-                Download PowerPoint (.pptx)
+                {downloading === "charts_png" ? "Menyiapkan..." : "Download PNG (High-Res)"}
               </button>
             </div>
           </div>
@@ -591,11 +1240,15 @@ export function DownloadCenter({
             </li>
             <li className="flex gap-2">
               <span className="text-teal-600 font-bold">•</span>
-              <span>Data bersifat rahasia dan hanya untuk keperluan analisis internal organisasi.</span>
+              <span><strong>Format Crosstabulasi:</strong> Mengikuti format yang sama dengan halaman Visualisasi Data (Training vs Competition).</span>
             </li>
             <li className="flex gap-2">
               <span className="text-teal-600 font-bold">•</span>
-              <span>Identitas atlet telah dianonimkan untuk menjaga privasi.</span>
+              <span><strong>Styling Excel:</strong> File Excel dilengkapi dengan header berwarna, zebra-striping, border, dan bold text untuk kemudahan membaca.</span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-teal-600 font-bold">•</span>
+              <span>Data bersifat rahasia dan hanya untuk keperluan analisis internal organisasi.</span>
             </li>
             <li className="flex gap-2">
               <span className="text-teal-600 font-bold">•</span>
@@ -604,6 +1257,115 @@ export function DownloadCenter({
           </ul>
         </div>
       </main>
+
+      {/* OFFSCREEN EXPORT AREA (hidden) */}
+      {exportPayload && (
+        <div
+          ref={(el) => { exportRef.current = el; }}
+          style={{
+            position: "fixed",
+            left: -99999,
+            top: 0,
+            width: 1200,
+            padding: 24,
+            background: "white",
+          }}
+        >
+          <h2 style={{ fontSize: 18, marginBottom: 12 }}>
+            Grafik Cedera ({exportPayload.start} – {exportPayload.end})
+          </h2>
+
+          {/* 1) Bar: cedera per bulan */}
+          <div data-chart="bar-cedera-per-bulan" style={{ width: 1100, height: 450, marginBottom: 24 }}>
+            <Bar
+              data={{
+                labels: (exportPayload.monthly ?? []).map((x: any) => x.bulan),
+                datasets: [
+                  { label: "Jumlah", data: (exportPayload.monthly ?? []).map((x: any) => x.jumlah) },
+                ],
+              }}
+              options={{ responsive: true, maintainAspectRatio: false }}
+            />
+          </div>
+
+          {/* 2) Pie: derajat */}
+          <div data-chart="pie-derajat" style={{ width: 700, height: 450, marginBottom: 24 }}>
+            <Pie
+              data={{
+                labels: (exportPayload.pie ?? []).map((x: any) => x.name),
+                datasets: [
+                  { label: "Proporsi", data: (exportPayload.pie ?? []).map((x: any) => x.value) },
+                ],
+              }}
+              options={{ responsive: true, maintainAspectRatio: false }}
+            />
+          </div>
+
+          {/* 3) Bar: top lokasi */}
+          <div data-chart="bar-top-lokasi" style={{ width: 1100, height: 450, marginBottom: 24 }}>
+            <Bar
+              data={{
+                labels: (exportPayload.topLok ?? []).map((x: any) => x.lokasi),
+                datasets: [
+                  { label: "Jumlah", data: (exportPayload.topLok ?? []).map((x: any) => x.jumlah) },
+                ],
+              }}
+              options={{ responsive: true, maintainAspectRatio: false }}
+            />
+          </div>
+
+          {/* 4) Bar: top aktivitas */}
+          <div data-chart="bar-top-aktivitas" style={{ width: 1100, height: 450, marginBottom: 24 }}>
+            <Bar
+              data={{
+                labels: (exportPayload.topAkt ?? []).map((x: any) => x.aktivitas),
+                datasets: [
+                  { label: "Jumlah", data: (exportPayload.topAkt ?? []).map((x: any) => x.jumlah) },
+                ],
+              }}
+              options={{ responsive: true, maintainAspectRatio: false }}
+            />
+          </div>
+
+          {/* Nasional-only charts */}
+          {exportPayload.isNasional && exportPayload.wilayahMonthly && (
+            <div data-chart="line-trend-per-wilayah" style={{ width: 1100, height: 450, marginBottom: 24 }}>
+              <Line
+                data={{
+                  labels: exportPayload.wilayahMonthly.monthLabels,
+                  datasets: exportPayload.wilayahMonthly.datasets.map((d: any) => ({
+                    label: d.label,
+                    data: d.data,
+                  })),
+                }}
+                options={{ responsive: true, maintainAspectRatio: false }}
+              />
+            </div>
+          )}
+
+          {exportPayload.isNasional && exportPayload.severityWilayah && (
+            <div data-chart="stacked-derajat-per-wilayah" style={{ width: 1100, height: 450, marginBottom: 24 }}>
+              <Bar
+                data={{
+                  labels: exportPayload.severityWilayah.wilayahList,
+                  datasets: exportPayload.severityWilayah.datasets.map((d: any) => ({
+                    label: d.label,
+                    data: d.data,
+                  })),
+                }}
+                options={{
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  scales: {
+                    x: { stacked: true },
+                    y: { stacked: true },
+                  },
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { PrivateSidebar } from './PrivateSidebar';
+import { useAuth } from '../contexts/auth-context';
 import { Menu, BookOpen, ChevronDown, ChevronUp, Shield, Users, Key, ClipboardList, History, Globe, AlertCircle, CheckCircle, Activity, Clock, FileText } from 'lucide-react';
 
 interface PanduanPrivatePageProps {
@@ -16,12 +17,17 @@ interface AccordionSection {
   color: string;
 }
 
-export function PanduanPrivatePage({ onNavigate, userRole = 'coach', onLogout }: PanduanPrivatePageProps) {
+export function PanduanPrivatePage({ onNavigate, userRole: userRoleProp, onLogout }: PanduanPrivatePageProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [openSection, setOpenSection] = useState<string | null>(null);
 
-  // Map userRole to format expected by PrivateSidebar
-  const mappedRole = userRole === 'coach' ? 'pelatih' : userRole === 'regional' ? 'admin_daerah' : 'admin_nasional';
+  const { profile } = useAuth();
+
+  // ✅ Map profile.role to format expected by PrivateSidebar
+  const mappedRole = useMemo(() => {
+    if (!profile?.role) return "pelatih";
+    return profile.role;
+  }, [profile?.role]);
 
   const handleLogout = () => {
     if (onLogout) {

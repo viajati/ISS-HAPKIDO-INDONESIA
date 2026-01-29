@@ -1,6 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PrivateSidebar } from './PrivateSidebar';
 import { Menu, Plus, Calendar, Users, AlertTriangle, Activity } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/auth-context';
+import type { Database } from '../lib/database.types';
+import { ModalRingkasanData, type LaporanData } from './ModalRingkasanData';
+import { fetchPelaporData, formatDateOnly } from '../lib/injury-helpers';
+
+type InjuryReport = Database['public']['Tables']['injury_reports']['Row'];
 
 interface DashboardRegionalProps {
   onNavigate: (page: string) => void;
@@ -8,45 +15,142 @@ interface DashboardRegionalProps {
 
 export function DashboardRegional({ onNavigate }: DashboardRegionalProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const { user, profile } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    totalMonth: 0,
+    mild: 0,
+    moderate: 0,
+    severe: 0,
+  });
+  const [recentEventInjuries, setRecentEventInjuries] = useState<InjuryReport[]>([]);
+  const [selectedInjury, setSelectedInjury] = useState<LaporanData | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
+    
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      try {
+        // Get current month start and end dates
+        const now = new Date();
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        
+        const firstDayStr = firstDay.toISOString().split('T')[0];
+        const lastDayStr = lastDay.toISOString().split('T')[0];
+
+        // Fetch injury reports for current month by this user only (exclude drafts)
+        const { data: reports, error } = await supabase
+          .from('injury_reports')
+          .select('*')
+          .eq('user_id', user.id)
+          .neq('status', 'draft')
+          .gte('injury_date', firstDayStr)
+          .lte('injury_date', lastDayStr)
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Calculate stats using severity_level from database
+        const totalMonth = reports?.length || 0;
+        let mild = 0;
+        let moderate = 0;
+        let severe = 0;
+
+        reports?.forEach((report) => {
+          if (!report.severity_level) return;
+          
+          const severityLevel = report.severity_level.toLowerCase().trim();
+          
+          if (severityLevel === 'ringan') {
+            mild++;
+          } else if (severityLevel === 'sedang') {
+            moderate++;
+          } else if (severityLevel === 'berat') {
+            severe++;
+          }
+        });
+
+        setStats({ totalMonth, mild, moderate, severe });
+
+        // Get 3 most recent injuries
+        const recent = reports?.slice(0, 3) || [];
+        setRecentEventInjuries(recent);
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [user?.id]);
 
   const handleLogout = () => {
     onNavigate('logout');
   };
 
-  // Mock data
-  const stats = {
-    totalMonth: 12,
-    mild: 7,
-    moderate: 3,
-    severe: 2,
+  // Helper function to get severity label from database
+  const getSeverityLabel = (severityLevel: string | null): string => {
+    if (!severityLevel) return 'TIDAK DIKETAHUI';
+    
+    const level = severityLevel.toLowerCase().trim();
+    
+    if (level === 'ringan') return 'RINGAN';
+    if (level === 'sedang') return 'SEDANG';
+    if (level === 'berat') return 'BERAT';
+    
+    return 'TIDAK DIKETAHUI';
   };
 
-  const recentEventInjuries = [
-    {
-      id: '2024-004',
-      event: 'Jakarta Open 2024',
-      athlete: 'Rizki Pratama',
-      dojang: 'Jakarta Selatan',
-      severity: 'SEDANG',
-      location: 'Lutut',
-    },
-    {
-      id: '2024-005',
-      event: 'Pelatda',
-      athlete: 'Diana Kusuma',
-      dojang: 'Jakarta Utara',
-      severity: 'RINGAN-SEDANG',
-      location: 'Pergelangan Tangan',
-    },
-    {
-      id: '2024-006',
-      event: 'Jakarta Open 2024',
-      athlete: 'Andi Wijaya',
-      dojang: 'Jakarta Timur',
-      severity: 'BERAT',
-      location: 'Bahu',
-    },
-  ];
+  // Helper function to get first injury location
+  const getFirstInjuryLocation = (injuries: any): string => {
+    if (Array.isArray(injuries) && injuries.length > 0) {
+      return injuries[0].location || 'Tidak diketahui';
+    }
+    return 'Tidak diketahui';
+  };
+
+  const handleInjuryClick = async (injury: InjuryReport) => {
+    // Convert InjuryReport to LaporanData format
+    const injuries = Array.isArray(injury.injuries) ? injury.injuries : [];
+    const redFlags = Array.isArray(injury.red_flags) ? injury.red_flags : [];
+    
+    // Fetch pelapor data using unified helper
+    const pelapor = await fetchPelaporData(injury.user_id);
+    
+    const laporanData: LaporanData = {
+      id: injury.id.toString(),
+      namaAtlet: injury.athlete_name,
+      jenisKelamin: injury.gender,
+      usia: injury.age,
+      tanggalKejadian: injury.injury_date,
+      jenisAktivitas: injury.activity_type,
+      konteks: injury.activity_context,
+      cederaDetails: injuries.map((inj: any) => ({
+        lokasi: inj.location || '',
+        jenis: inj.type || '',
+        mekanisme: inj.mechanism || ''
+      })),
+      kemampuanGerak: injury.movement_ability,
+      tingkatNyeri: injury.pain_level,
+      redFlags: redFlags.map((flag: any) => typeof flag === 'string' ? flag : flag.name || ''),
+      severityLevel: injury.severity_level || undefined,
+      pelapor,
+      status: injury.status,
+      tanggalLapor: formatDateOnly(injury.created_at),
+      tanggalVerifikasi: formatDateOnly(injury.verified_at),
+      verifikator: injury.verified_by || undefined
+    };
+    
+    setSelectedInjury(laporanData);
+    setIsModalOpen(true);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 lg:pl-64">
@@ -78,11 +182,11 @@ export function DashboardRegional({ onNavigate }: DashboardRegionalProps) {
             </div>
             <div className="flex items-center gap-3">
               <div className="text-right hidden md:block">
-                <p className="text-sm">Admin Daerah</p>
-                <p className="text-xs text-gray-600">DKI Jakarta</p>
+                <p className="text-sm">{profile?.full_name || 'Admin Daerah'}</p>
+                <p className="text-xs text-gray-600">{profile?.wilayah || 'Indonesia'}</p>
               </div>
-              <div className="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center text-white">
-                DJ
+              <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white">
+                {profile?.full_name?.charAt(0).toUpperCase() || 'A'}
               </div>
             </div>
           </div>
@@ -91,25 +195,44 @@ export function DashboardRegional({ onNavigate }: DashboardRegionalProps) {
 
       {/* Main Content */}
       <main className="p-4 md:p-6 lg:p-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+          </div>
+        ) : (
+          <>
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm text-gray-600">Total Laporan Bulan Ini</h3>
               <Activity className="w-5 h-5 text-blue-600" />
             </div>
             <p className="text-3xl">{stats.totalMonth}</p>
-            <p className="text-xs text-gray-500 mt-1">Desember 2024</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
+            </p>
           </div>
 
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm text-gray-600">Cedera Ringan-Sedang</h3>
+              <h3 className="text-sm text-gray-600">Cedera Ringan</h3>
               <Activity className="w-5 h-5 text-green-600" />
             </div>
             <p className="text-3xl text-green-600">{stats.mild}</p>
             <p className="text-xs text-gray-500 mt-1">
-              {((stats.mild / stats.totalMonth) * 100).toFixed(0)}% dari total
+              {stats.totalMonth > 0 ? ((stats.mild / stats.totalMonth) * 100).toFixed(0) : 0}% dari total
+            </p>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm text-gray-600">Cedera Sedang</h3>
+              <AlertTriangle className="w-5 h-5 text-yellow-600" />
+            </div>
+            <p className="text-3xl text-yellow-600">{stats.moderate}</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {stats.totalMonth > 0 ? ((stats.moderate / stats.totalMonth) * 100).toFixed(0) : 0}% dari total
             </p>
           </div>
 
@@ -120,17 +243,8 @@ export function DashboardRegional({ onNavigate }: DashboardRegionalProps) {
             </div>
             <p className="text-3xl text-red-600">{stats.severe}</p>
             <p className="text-xs text-gray-500 mt-1">
-              {((stats.severe / stats.totalMonth) * 100).toFixed(0)}% dari total
+              {stats.totalMonth > 0 ? ((stats.severe / stats.totalMonth) * 100).toFixed(0) : 0}% dari total
             </p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm text-gray-600">Menunggu Verifikasi</h3>
-              <AlertTriangle className="w-5 h-5 text-orange-600" />
-            </div>
-            <p className="text-3xl text-orange-600">{stats.moderate}</p>
-            <p className="text-xs text-gray-500 mt-1">Perlu ditindaklanjuti</p>
           </div>
         </div>
 
@@ -140,7 +254,7 @@ export function DashboardRegional({ onNavigate }: DashboardRegionalProps) {
             <div>
               <h2>Overview Cedera Terkini</h2>
               <p className="text-sm text-gray-600 mt-1">
-                3 cedera terakhir yang dilaporkan dari event
+                {recentEventInjuries.length} cedera terakhir yang Anda laporkan
               </p>
             </div>
             <button
@@ -151,33 +265,44 @@ export function DashboardRegional({ onNavigate }: DashboardRegionalProps) {
             </button>
           </div>
           <div className="p-6 space-y-4">
-            {recentEventInjuries.map((injury) => (
-              <div
-                key={injury.id}
-                className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
-                onClick={() => onNavigate('riwayat')}
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <p className="text-sm text-gray-900">{injury.athlete}</p>
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs ${
-                        injury.severity === 'RINGAN' || injury.severity === 'RINGAN-SEDANG'
-                          ? 'bg-green-100 text-green-800'
-                          : injury.severity === 'SEDANG'
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {injury.severity}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-600">
-                    {injury.location} • {injury.event} • {injury.dojang}
-                  </p>
-                </div>
+            {recentEventInjuries.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <AlertTriangle className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                <p>Belum ada laporan cedera bulan ini</p>
               </div>
-            ))}
+            ) : (
+              recentEventInjuries.map((injury) => {
+                const severity = getSeverityLabel(injury.severity_level);
+                const location = getFirstInjuryLocation(injury.injuries);
+                return (
+                  <div
+                    key={injury.id}
+                    className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                    onClick={() => handleInjuryClick(injury)}
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-1">
+                        <p className="text-sm text-gray-900">{injury.athlete_name}</p>
+                        <span
+                          className={`px-2 py-1 rounded-full text-xs ${
+                            severity === 'RINGAN' || severity === 'SEDANG'
+                              ? 'bg-green-100 text-green-800'
+                              : severity === 'BERAT'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-yellow-100 text-yellow-800'
+                          }`}
+                        >
+                          {severity}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-600">
+                        {location} • {injury.activity_type} • {injury.activity_context}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -188,8 +313,8 @@ export function DashboardRegional({ onNavigate }: DashboardRegionalProps) {
             className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 text-left hover:bg-blue-100 transition-colors"
           >
             <Plus className="w-8 h-8 text-blue-600 mb-2" />
-            <h3 className="text-blue-900 mb-1">Input Cedera Event</h3>
-            <p className="text-sm text-blue-700">Laporkan cedera dari event daerah</p>
+            <h3 className="text-blue-900 mb-1">Input Cedera Baru</h3>
+            <p className="text-sm text-blue-700">Laporkan cedera dari atlet Anda</p>
           </button>
 
           <button
@@ -198,7 +323,7 @@ export function DashboardRegional({ onNavigate }: DashboardRegionalProps) {
           >
             <Activity className="w-8 h-8 text-gray-600 mb-2" />
             <h3 className="text-gray-900 mb-1">Riwayat Lengkap</h3>
-            <p className="text-sm text-gray-600">Lihat semua laporan cedera event</p>
+            <p className="text-sm text-gray-600">Lihat semua laporan cedera Anda</p>
           </button>
 
           <button
@@ -210,7 +335,21 @@ export function DashboardRegional({ onNavigate }: DashboardRegionalProps) {
             <p className="text-sm text-yellow-700">Lanjutkan laporan yang belum selesai</p>
           </button>
         </div>
+          </>
+        )}
       </main>
+
+      {/* Modal Ringkasan Data */}
+      {selectedInjury && (
+        <ModalRingkasanData
+          isOpen={isModalOpen}
+          onClose={() => {
+            setIsModalOpen(false);
+            setSelectedInjury(null);
+          }}
+          data={selectedInjury}
+        />
+      )}
     </div>
   );
 }

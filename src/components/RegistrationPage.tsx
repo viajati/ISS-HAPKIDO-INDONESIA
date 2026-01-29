@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { User, Phone, MapPin, Shield, Calendar, CheckCircle, ArrowRight, ArrowLeft } from 'lucide-react';
 import logoImage from '../../public/assets/hapkido-logo.png';
+import { PROVINSI_INDONESIA } from '../lib/constants';
 
 interface RegistrationPageProps {
   onNavigate: (page: string) => void;
@@ -59,16 +60,6 @@ export function RegistrationPage({ onNavigate, userRole = 'coach' }: Registratio
       onNavigate('dashboard-national');
     }
   };
-
-  const provinces = [
-    'DKI Jakarta', 'Jawa Barat', 'Jawa Tengah', 'Jawa Timur', 'Banten',
-    'DI Yogyakarta', 'Sumatera Utara', 'Sumatera Barat', 'Sumatera Selatan',
-    'Riau', 'Kepulauan Riau', 'Lampung', 'Bengkulu', 'Jambi', 'Aceh',
-    'Kalimantan Barat', 'Kalimantan Tengah', 'Kalimantan Selatan', 'Kalimantan Timur', 'Kalimantan Utara',
-    'Sulawesi Utara', 'Sulawesi Tengah', 'Sulawesi Selatan', 'Sulawesi Tenggara', 'Gorontalo', 'Sulawesi Barat',
-    'Bali', 'Nusa Tenggara Barat', 'Nusa Tenggara Timur',
-    'Maluku', 'Maluku Utara', 'Papua', 'Papua Barat', 'Papua Tengah', 'Papua Pegunungan', 'Papua Selatan', 'Papua Barat Daya'
-  ];
 
   const sabukLevels = [
     'Sabuk Putih (10th Gup)',
@@ -237,7 +228,7 @@ export function RegistrationPage({ onNavigate, userRole = 'coach' }: Registratio
             <div>
               <label htmlFor="region" className="flex items-center gap-2 text-sm text-gray-700 mb-2">
                 <MapPin className="w-4 h-4" />
-                Wilayah / Provinsi
+                Provinsi
               </label>
               <select
                 id="region"
@@ -246,8 +237,8 @@ export function RegistrationPage({ onNavigate, userRole = 'coach' }: Registratio
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
                 required
               >
-                <option value="">Pilih Wilayah</option>
-                {provinces.map((province) => (
+                <option value="">-- Pilih Provinsi --</option>
+                {PROVINSI_INDONESIA.map((province) => (
                   <option key={province} value={province}>
                     {province}
                   </option>

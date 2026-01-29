@@ -58,7 +58,7 @@ export function Sidebar({ isOpen, onClose, onNavigate }: SidebarProps) {
               className="flex items-center gap-3 hover:opacity-80 transition-opacity w-full text-left"
             >
               <img
-                src={logoImage}
+                src={logoImage.src}
                 alt="Hapkido Indonesia Logo"
                 className="w-14 h-14 object-contain"
               />

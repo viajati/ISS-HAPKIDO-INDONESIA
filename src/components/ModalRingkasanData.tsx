@@ -18,6 +18,7 @@ export interface LaporanData {
   kemampuanGerak: string;
   tingkatNyeri: string;
   redFlags: string[];
+  severityLevel?: string; // Pre-calculated severity from database: 'ringan', 'sedang', or 'berat'
   pelapor?: {
     nama: string;
     wilayah: string;
@@ -148,6 +149,20 @@ export function ModalRingkasanData({ isOpen, onClose, data }: ModalRingkasanData
                   )}
                 </div>
               </div>
+              {data.severityLevel && (
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Tingkat Keparahan:</span>
+                  <span className={`text-sm px-3 py-1 rounded-full ${
+                    data.severityLevel === 'ringan'
+                      ? 'bg-green-100 text-green-700'
+                      : data.severityLevel === 'sedang'
+                      ? 'bg-yellow-100 text-yellow-700'
+                      : 'bg-red-100 text-red-700'
+                  }`}>
+                    {data.severityLevel.toUpperCase()}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
