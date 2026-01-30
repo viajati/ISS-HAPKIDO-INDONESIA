@@ -21,8 +21,8 @@ function getBearerToken(req: Request) {
   return null;
 }
 
-function randomToken(len = 16) {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+function randomToken(len = 4) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   let out = "";
   for (let i = 0; i < len; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
   return out;
@@ -94,8 +94,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "validDays harus 1-365" }, { status: 400 });
     }
 
-    // Token 16 char sesuai schema (VARCHAR(16))
-    const token = randomToken(16);
+    // Token 4 huruf (A-Z)
+    const token = randomToken(4);
 
     // Expire token aktif sebelumnya untuk role yang sama (1 token aktif per role)
     const { error: expireErr } = await auth.supabaseAdmin

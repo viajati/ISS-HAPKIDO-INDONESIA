@@ -1,37 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { PrivateSidebar } from './PrivateSidebar';
-import { Menu, Download, FileSpreadsheet, Table, BarChart3, Filter, Calendar, FileText, FileDown } from 'lucide-react';
+import { Menu, Download, FileSpreadsheet, Table, Filter, Calendar, FileText } from 'lucide-react';
 import { useAuth } from '../contexts/auth-context';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
-import JSZip from 'jszip';
-import html2canvas from 'html2canvas';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  LineElement,
-  ArcElement,
-  Title,
-  Tooltip,
-  Legend,
-} from 'chart.js';
-import { Bar, Pie, Line } from 'react-chartjs-2';
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  LineElement,
-  ArcElement,
-  Title,
-  Tooltip,
-  Legend
-);
 
 // Helper functions for Excel/CSV export
 function toCsvAndDownload(rows: any[], filename: string) {
@@ -345,59 +318,6 @@ async function fetchProfilesMap(userIds: string[]) {
   return m;
 }
 
-function groupMonthlyByWilayah(rows: any[], idToWilayah: Map<string, string>) {
-  const months = Array.from(new Set(rows.map(r => monthKey(r.injury_date)))).sort();
-  const wilayahSet = new Set<string>();
-  const counts = new Map<string, Map<string, number>>();
-
-  for (const r of rows) {
-    const w = idToWilayah.get(r.user_id) ?? "Tidak diketahui";
-    wilayahSet.add(w);
-    const mk = monthKey(r.injury_date);
-
-    if (!counts.has(w)) counts.set(w, new Map());
-    const m = counts.get(w)!;
-    m.set(mk, (m.get(mk) ?? 0) + 1);
-  }
-
-  const wilayahList = Array.from(wilayahSet).sort();
-  const datasets = wilayahList.map(w => ({
-    label: w,
-    data: months.map(mk => counts.get(w)?.get(mk) ?? 0),
-  }));
-
-  return { months, monthLabels: months.map(labelMonth), datasets };
-}
-
-function groupSeverityByWilayah(rows: any[], idToWilayah: Map<string, string>) {
-  const severities = ["Ringan", "Sedang", "Berat", "Lainnya"];
-  const wilayahSet = new Set<string>();
-  const counts = new Map<string, Map<string, number>>();
-
-  for (const r of rows) {
-    const w = idToWilayah.get(r.user_id) ?? "Tidak diketahui";
-    wilayahSet.add(w);
-
-    const sevRaw = (r.severity_level ?? "").toString().toLowerCase();
-    let sev = "Lainnya";
-    if (sevRaw === "ringan") sev = "Ringan";
-    else if (sevRaw === "sedang") sev = "Sedang";
-    else if (sevRaw === "berat") sev = "Berat";
-
-    if (!counts.has(w)) counts.set(w, new Map());
-    const m = counts.get(w)!;
-    m.set(sev, (m.get(sev) ?? 0) + 1);
-  }
-
-  const wilayahList = Array.from(wilayahSet).sort();
-  const datasets = severities.map(sev => ({
-    label: sev,
-    data: wilayahList.map(w => counts.get(w)?.get(sev) ?? 0),
-  }));
-
-  return { wilayahList, severities, datasets };
-}
-
 interface DownloadCenterProps {
   onNavigate: (page: string) => void;
 }
@@ -413,12 +333,7 @@ export function DownloadCenter({
   const [customEndDate, setCustomEndDate] = useState('');
   const [formatData, setFormatData] = useState<'wide' | 'long'>('wide');
   const [selectedCrosstab, setSelectedCrosstab] = useState('derajat-wilayah');
-  const [selectedChart, setSelectedChart] = useState('bar-bulan');
   const [downloading, setDownloading] = useState<string | null>(null);
-
-  // Untuk mode export (render chart off-screen)
-  const [exportPayload, setExportPayload] = useState<any | null>(null);
-  const exportRef = useMemo(() => ({ current: null as HTMLDivElement | null }), []);
 
   const handleLogout = () => {
     onNavigate('logout');
@@ -452,65 +367,6 @@ export function DownloadCenter({
     if (periodeFilter === 'tahun') return `Tahun ${selectedYear}`;
     if (periodeFilter === 'custom') return `Custom: ${customStartDate} - ${customEndDate}`;
     return '6 Bulan Terakhir';
-  };
-
-  const exportChartsZip = async (start: string, end: string, isNasional: boolean) => {
-    // 1) ambil data chart berbasis RPC yang sudah ada
-    const [monthly, pie, topLok, topAkt] = await Promise.all([
-      (supabase.rpc as any)("analytics_monthly_counts", { start_date: start, end_date: end }),
-      (supabase.rpc as any)("analytics_severity_pie", { start_date: start, end_date: end }),
-      (supabase.rpc as any)("analytics_top_locations", { start_date: start, end_date: end, top_n: 10 }),
-      (supabase.rpc as any)("analytics_top_activities", { start_date: start, end_date: end, top_n: 10 }),
-    ]);
-
-    const anyErr = monthly.error || pie.error || topLok.error || topAkt.error;
-    if (anyErr) throw anyErr;
-
-    // 2) untuk nasional: agregasi wilayah via raw query
-    let wilayahMonthly: any = null;
-    let severityWilayah: any = null;
-
-    if (isNasional) {
-      const rows = await fetchVerifiedForAggregation(start, end);
-      const idMap = await fetchProfilesMap(rows.map(r => r.user_id));
-      wilayahMonthly = groupMonthlyByWilayah(rows, idMap);
-      severityWilayah = groupSeverityByWilayah(rows, idMap);
-    }
-
-    // 3) set payload -> render offscreen
-    setExportPayload({
-      start, end,
-      monthly: monthly.data ?? [],
-      pie: pie.data ?? [],
-      topLok: topLok.data ?? [],
-      topAkt: topAkt.data ?? [],
-      wilayahMonthly,
-      severityWilayah,
-      isNasional,
-    });
-
-    // 4) tunggu render 2 frame
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-    // 5) capture PNG per chart
-    if (!exportRef.current) throw new Error("Export container not ready");
-
-    const chartNodes = exportRef.current.querySelectorAll("[data-chart]");
-    const zip = new JSZip();
-
-    for (const node of Array.from(chartNodes)) {
-      const el = node as HTMLElement;
-      const name = el.getAttribute("data-chart") ?? "chart";
-      const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff" });
-      const blob: Blob | null = await new Promise(res => canvas.toBlob(res, "image/png"));
-      if (blob) zip.file(`${name}.png`, blob);
-    }
-
-    const zipBlob = await zip.generateAsync({ type: "blob" });
-    downloadBlob(zipBlob, `charts_${start}_to_${end}.zip`);
-
-    // cleanup
-    setExportPayload(null);
   };
 
   const handleDownload = async (type: string) => {
@@ -664,13 +520,6 @@ export function DownloadCenter({
         }
 
         toast.success("Download dimulai", { id: "dl" });
-        return;
-      }
-
-      // 3) PNG grafik
-      if (type === "charts_png") {
-        await exportChartsZip(start, end, isNasional);
-        toast.success("ZIP grafik berhasil dibuat", { id: "dl" });
         return;
       }
 
@@ -1045,191 +894,6 @@ export function DownloadCenter({
           </div>
         </div>
 
-        {/* 3. Ilustrasi & Grafik */}
-        <div className="bg-white rounded-lg shadow-md overflow-hidden">
-          <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-pink-50">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center">
-                <BarChart3 className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h2 className="text-purple-900">3. Ilustrasi & Grafik</h2>
-                <p className="text-sm text-purple-700">Visualisasi data dalam bentuk chart dan diagram</p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="p-6">
-            {/* Chart Options */}
-            <div className="mb-6">
-              <p className="text-sm font-medium text-gray-700 mb-3">Pilih grafik yang ingin didownload:</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button
-                  onClick={() => setSelectedChart('bar-bulan')}
-                  className={`p-4 border-2 rounded-lg text-left transition-all ${
-                    selectedChart === 'bar-bulan'
-                      ? 'border-purple-600 bg-purple-50'
-                      : 'border-gray-200 hover:border-purple-300'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="radio"
-                      checked={selectedChart === 'bar-bulan'}
-                      onChange={() => setSelectedChart('bar-bulan')}
-                      className="mt-1"
-                    />
-                    <BarChart3 className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-medium text-gray-900">Bar Chart: Cedera per Bulan</p>
-                      <p className="text-sm text-gray-600 mt-1">Trend jumlah cedera bulanan</p>
-                    </div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setSelectedChart('pie-derajat')}
-                  className={`p-4 border-2 rounded-lg text-left transition-all ${
-                    selectedChart === 'pie-derajat'
-                      ? 'border-purple-600 bg-purple-50'
-                      : 'border-gray-200 hover:border-purple-300'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="radio"
-                      checked={selectedChart === 'pie-derajat'}
-                      onChange={() => setSelectedChart('pie-derajat')}
-                      className="mt-1"
-                    />
-                    <BarChart3 className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-medium text-gray-900">Pie Chart: Distribusi Derajat</p>
-                      <p className="text-sm text-gray-600 mt-1">Proporsi ringan/sedang/berat</p>
-                    </div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setSelectedChart('bar-lokasi')}
-                  className={`p-4 border-2 rounded-lg text-left transition-all ${
-                    selectedChart === 'bar-lokasi'
-                      ? 'border-purple-600 bg-purple-50'
-                      : 'border-gray-200 hover:border-purple-300'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="radio"
-                      checked={selectedChart === 'bar-lokasi'}
-                      onChange={() => setSelectedChart('bar-lokasi')}
-                      className="mt-1"
-                    />
-                    <BarChart3 className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-medium text-gray-900">Bar Chart: Lokasi Cedera</p>
-                      <p className="text-sm text-gray-600 mt-1">Top lokasi cedera terbanyak</p>
-                    </div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setSelectedChart('bar-aktivitas')}
-                  className={`p-4 border-2 rounded-lg text-left transition-all ${
-                    selectedChart === 'bar-aktivitas'
-                      ? 'border-purple-600 bg-purple-50'
-                      : 'border-gray-200 hover:border-purple-300'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="radio"
-                      checked={selectedChart === 'bar-aktivitas'}
-                      onChange={() => setSelectedChart('bar-aktivitas')}
-                      className="mt-1"
-                    />
-                    <BarChart3 className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-medium text-gray-900">Bar Chart: Jenis Aktivitas</p>
-                      <p className="text-sm text-gray-600 mt-1">Aktivitas penyebab cedera</p>
-                    </div>
-                  </div>
-                </button>
-
-                {isNasional && (
-                  <>
-                    <button
-                      onClick={() => setSelectedChart('line-wilayah')}
-                      className={`p-4 border-2 rounded-lg text-left transition-all ${
-                        selectedChart === 'line-wilayah'
-                          ? 'border-purple-600 bg-purple-50'
-                          : 'border-gray-200 hover:border-purple-300'
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <input
-                          type="radio"
-                          checked={selectedChart === 'line-wilayah'}
-                          onChange={() => setSelectedChart('line-wilayah')}
-                          className="mt-1"
-                        />
-                        <BarChart3 className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <p className="font-medium text-gray-900">Line Chart: Trend per Wilayah</p>
-                          <p className="text-sm text-gray-600 mt-1">Perbandingan trend antar wilayah</p>
-                        </div>
-                      </div>
-                    </button>
-
-                    <button
-                      onClick={() => setSelectedChart('stacked-derajat')}
-                      className={`p-4 border-2 rounded-lg text-left transition-all ${
-                        selectedChart === 'stacked-derajat'
-                          ? 'border-purple-600 bg-purple-50'
-                          : 'border-gray-200 hover:border-purple-300'
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <input
-                          type="radio"
-                          checked={selectedChart === 'stacked-derajat'}
-                          onChange={() => setSelectedChart('stacked-derajat')}
-                          className="mt-1"
-                        />
-                        <BarChart3 className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <p className="font-medium text-gray-900">Stacked Bar: Derajat × Wilayah</p>
-                          <p className="text-sm text-gray-600 mt-1">Breakdown derajat per wilayah</p>
-                        </div>
-                      </div>
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Format Info */}
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-purple-900">
-                <strong>Format:</strong> Semua grafik akan diexport dalam resolusi tinggi (High-Resolution PNG) 
-                yang cocok untuk publikasi dan presentasi.
-              </p>
-            </div>
-
-            {/* Download Buttons */}
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={() => handleDownload("charts_png")}
-                disabled={downloading !== null}
-                className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors cursor-pointer shadow-sm hover:shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <FileDown className="w-5 h-5" />
-                {downloading === "charts_png" ? "Menyiapkan..." : "Download PNG (High-Res)"}
-              </button>
-            </div>
-          </div>
-        </div>
-
         {/* Footer Info */}
         <div className="mt-8 bg-gray-100 border border-gray-300 rounded-lg p-6">
           <h3 className="text-sm font-medium text-gray-900 mb-3">Catatan Penting</h3>
@@ -1258,114 +922,6 @@ export function DownloadCenter({
         </div>
       </main>
 
-      {/* OFFSCREEN EXPORT AREA (hidden) */}
-      {exportPayload && (
-        <div
-          ref={(el) => { exportRef.current = el; }}
-          style={{
-            position: "fixed",
-            left: -99999,
-            top: 0,
-            width: 1200,
-            padding: 24,
-            background: "white",
-          }}
-        >
-          <h2 style={{ fontSize: 18, marginBottom: 12 }}>
-            Grafik Cedera ({exportPayload.start} – {exportPayload.end})
-          </h2>
-
-          {/* 1) Bar: cedera per bulan */}
-          <div data-chart="bar-cedera-per-bulan" style={{ width: 1100, height: 450, marginBottom: 24 }}>
-            <Bar
-              data={{
-                labels: (exportPayload.monthly ?? []).map((x: any) => x.bulan),
-                datasets: [
-                  { label: "Jumlah", data: (exportPayload.monthly ?? []).map((x: any) => x.jumlah) },
-                ],
-              }}
-              options={{ responsive: true, maintainAspectRatio: false }}
-            />
-          </div>
-
-          {/* 2) Pie: derajat */}
-          <div data-chart="pie-derajat" style={{ width: 700, height: 450, marginBottom: 24 }}>
-            <Pie
-              data={{
-                labels: (exportPayload.pie ?? []).map((x: any) => x.name),
-                datasets: [
-                  { label: "Proporsi", data: (exportPayload.pie ?? []).map((x: any) => x.value) },
-                ],
-              }}
-              options={{ responsive: true, maintainAspectRatio: false }}
-            />
-          </div>
-
-          {/* 3) Bar: top lokasi */}
-          <div data-chart="bar-top-lokasi" style={{ width: 1100, height: 450, marginBottom: 24 }}>
-            <Bar
-              data={{
-                labels: (exportPayload.topLok ?? []).map((x: any) => x.lokasi),
-                datasets: [
-                  { label: "Jumlah", data: (exportPayload.topLok ?? []).map((x: any) => x.jumlah) },
-                ],
-              }}
-              options={{ responsive: true, maintainAspectRatio: false }}
-            />
-          </div>
-
-          {/* 4) Bar: top aktivitas */}
-          <div data-chart="bar-top-aktivitas" style={{ width: 1100, height: 450, marginBottom: 24 }}>
-            <Bar
-              data={{
-                labels: (exportPayload.topAkt ?? []).map((x: any) => x.aktivitas),
-                datasets: [
-                  { label: "Jumlah", data: (exportPayload.topAkt ?? []).map((x: any) => x.jumlah) },
-                ],
-              }}
-              options={{ responsive: true, maintainAspectRatio: false }}
-            />
-          </div>
-
-          {/* Nasional-only charts */}
-          {exportPayload.isNasional && exportPayload.wilayahMonthly && (
-            <div data-chart="line-trend-per-wilayah" style={{ width: 1100, height: 450, marginBottom: 24 }}>
-              <Line
-                data={{
-                  labels: exportPayload.wilayahMonthly.monthLabels,
-                  datasets: exportPayload.wilayahMonthly.datasets.map((d: any) => ({
-                    label: d.label,
-                    data: d.data,
-                  })),
-                }}
-                options={{ responsive: true, maintainAspectRatio: false }}
-              />
-            </div>
-          )}
-
-          {exportPayload.isNasional && exportPayload.severityWilayah && (
-            <div data-chart="stacked-derajat-per-wilayah" style={{ width: 1100, height: 450, marginBottom: 24 }}>
-              <Bar
-                data={{
-                  labels: exportPayload.severityWilayah.wilayahList,
-                  datasets: exportPayload.severityWilayah.datasets.map((d: any) => ({
-                    label: d.label,
-                    data: d.data,
-                  })),
-                }}
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  scales: {
-                    x: { stacked: true },
-                    y: { stacked: true },
-                  },
-                }}
-              />
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

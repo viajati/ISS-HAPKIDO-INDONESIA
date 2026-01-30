@@ -1,5 +1,5 @@
 /**
- * Daftar provinsi di Indonesia (34 provinsi)
+ * Daftar provinsi di Indonesia (38 provinsi)
  * Digunakan untuk dropdown wilayah di semua form
  */
 export const PROVINSI_INDONESIA = [
@@ -36,7 +36,11 @@ export const PROVINSI_INDONESIA = [
   'Maluku',
   'Maluku Utara',
   'Papua Barat',
+  'Papua Barat Daya',
   'Papua',
+  'Papua Selatan',
+  'Papua Tengah',
+  'Papua Pegunungan',
 ] as const;
 
 export type Provinsi = typeof PROVINSI_INDONESIA[number];
