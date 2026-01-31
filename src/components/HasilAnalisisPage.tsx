@@ -13,7 +13,7 @@ export function HasilAnalisisPage({ onNavigate }: HasilAnalisisPageProps) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const infographics = ['/assets/info1.png', '/assets/info2.png'];
+  const infographics = ['/assets/info1.jpg', '/assets/info2.jpg'];
 
   const nextSlide = () => {
     setCurrentSlide((prev) => (prev + 1) % infographics.length);
