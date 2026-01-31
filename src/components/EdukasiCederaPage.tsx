@@ -175,7 +175,7 @@ export function EdukasiCederaPage({ onNavigate }: EdukasiCederaPageProps) {
             {openSection === 'm1' && (
               <div className="px-6 pb-6 border-t border-gray-100">
                 <div className="mt-4 space-y-6">
-                  <ModulImageZoom src="/assets/modul1.png" alt="Modul 1" />
+                  <ModulImageZoom src="/assets/modul1.jpg" alt="Modul 1" />
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <h3 className="mb-2" style={{ color: 'var(--dark-navy-0)' }}>Untuk apa modul ini?</h3>
                     <p className="text-gray-700">Modul ini ditujukan bagi pelatih Hapkido yang ingin menjaga atlet tetap berkembang tanpa mengorbankan keselamatan.</p>
@@ -295,7 +295,7 @@ export function EdukasiCederaPage({ onNavigate }: EdukasiCederaPageProps) {
             {openSection === 'm2' && (
               <div className="px-6 pb-6 border-t border-gray-100">
                 <div className="mt-4 space-y-6">
-                  <ModulImageZoom src="/assets/modul2.png" alt="Modul 2" />
+                  <ModulImageZoom src="/assets/modul2.jpg" alt="Modul 2" />
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <h3 className="mb-2" style={{ color: 'var(--dark-navy-0)' }}>Untuk apa modul ini?</h3>
                     <p className="text-gray-700">Agar pelatih lebih peka melihat risiko, bukan sekadar bereaksi saat cedera sudah terjadi.</p>
@@ -444,7 +444,7 @@ export function EdukasiCederaPage({ onNavigate }: EdukasiCederaPageProps) {
             {openSection === 'm3' && (
               <div className="px-6 pb-6 border-t border-gray-100">
                 <div className="mt-4 space-y-6">
-                  <ModulImageZoom src="/assets/modul3.png" alt="Modul 3" />
+                  <ModulImageZoom src="/assets/modul3.jpg" alt="Modul 3" />
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <h3 className="mb-2" style={{ color: 'var(--dark-navy-0)' }}>Untuk apa modul ini?</h3>
                     <p className="text-gray-700">Agar pelatih tidak terjebak pada dua ekstrem: latihan terlalu keras atau latihan terlalu aman tapi tidak berkembang.</p>
@@ -579,7 +579,7 @@ export function EdukasiCederaPage({ onNavigate }: EdukasiCederaPageProps) {
             {openSection === 'm4' && (
               <div className="px-6 pb-6 border-t border-gray-100">
                 <div className="mt-4 space-y-6">
-                  <ModulImageZoom src="/assets/modul4.png" alt="Modul 4" />
+                  <ModulImageZoom src="/assets/modul4.jpg" alt="Modul 4" />
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <h3 className="mb-2" style={{ color: 'var(--dark-navy-0)' }}>Untuk apa modul ini?</h3>
                     <p className="text-gray-700">Agar pelatih tidak melihat pemanasan dan pendinginan sebagai rutinitas pembuka dan penutup semata, tetapi sebagai bagian inti dari keselamatan latihan.</p>
@@ -736,7 +736,7 @@ export function EdukasiCederaPage({ onNavigate }: EdukasiCederaPageProps) {
             {openSection === 'm5' && (
               <div className="px-6 pb-6 border-t border-gray-100">
                 <div className="mt-4 space-y-6">
-                  <ModulImageZoom src="/assets/modul5.png" alt="Modul 5" />
+                  <ModulImageZoom src="/assets/modul5.jpg" alt="Modul 5" />
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <h3 className="mb-2" style={{ color: 'var(--dark-navy-0)' }}>Untuk apa modul ini?</h3>
                     <p className="text-gray-700">Agar pelatih tidak menunggu cedera terlihat parah baru bertindak.</p>
@@ -848,7 +848,7 @@ export function EdukasiCederaPage({ onNavigate }: EdukasiCederaPageProps) {
             {openSection === 'm6' && (
               <div className="px-6 pb-6 border-t border-gray-100">
                 <div className="mt-4 space-y-6">
-                  <ModulImageZoom src="/assets/modul6.png" alt="Modul 6" />
+                  <ModulImageZoom src="/assets/modul6.jpg" alt="Modul 6" />
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <h3 className="mb-2" style={{ color: 'var(--dark-navy-0)' }}>Untuk apa modul ini?</h3>
                     <p className="text-gray-700">Agar pelatih tahu apa yang harus dilakukan dan apa yang tidak perlu dilakukan saat cedera terjadi.</p>
@@ -991,7 +991,7 @@ export function EdukasiCederaPage({ onNavigate }: EdukasiCederaPageProps) {
             {openSection === 'm7' && (
               <div className="px-6 pb-6 border-t border-gray-100">
                 <div className="mt-4 space-y-6">
-                  <ModulImageZoom src="/assets/modul7.png" alt="Modul 7" />
+                  <ModulImageZoom src="/assets/modul7.jpg" alt="Modul 7" />
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <h3 className="mb-2" style={{ color: 'var(--dark-navy-0)' }}>Untuk apa modul ini?</h3>
                     <p className="text-gray-700">Agar pelatih tidak ragu, tidak gegabah, dan tahu kapan harus melanjutkan latihan dan kapan harus menghentikannya.</p>
@@ -1071,7 +1071,7 @@ export function EdukasiCederaPage({ onNavigate }: EdukasiCederaPageProps) {
             {openSection === 'm8' && (
               <div className="px-6 pb-6 border-t border-gray-100">
                 <div className="mt-4 space-y-6">
-                  <ModulImageZoom src="/assets/modul8.png" alt="Modul 8" />
+                  <ModulImageZoom src="/assets/modul8.jpg" alt="Modul 8" />
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <h3 className="mb-2" style={{ color: 'var(--dark-navy-0)' }}>Untuk apa modul ini?</h3>
                     <p className="text-gray-700">Agar pelatih memahami bahwa mencatat cedera bukan beban administrasi, tetapi bagian dari perlindungan atlet.</p>
@@ -1123,7 +1123,7 @@ export function EdukasiCederaPage({ onNavigate }: EdukasiCederaPageProps) {
             {openSection === 'm9' && (
               <div className="px-6 pb-6 border-t border-gray-100">
                 <div className="mt-4 space-y-6">
-                  <ModulImageZoom src="/assets/modul9.png" alt="Modul 9" />
+                  <ModulImageZoom src="/assets/modul9.jpg" alt="Modul 9" />
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <h3 className="mb-2" style={{ color: 'var(--dark-navy-0)' }}>Panduan Cepat untuk Pelatih Hapkido</h3>
                     <p className="text-sm text-gray-700">Ikuti langkah-langkah berikut saat menghadapi cedera.</p>
