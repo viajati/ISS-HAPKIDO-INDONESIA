@@ -274,7 +274,6 @@ export function DashboardNational({ onNavigate }: DashboardNationalProps) {
               <Activity className="w-5 h-5 text-blue-600" />
             </div>
             <p className="text-3xl">{heroMetrics.totalCedera}</p>
-            <p className="text-xs text-gray-500 mt-1">Submitted + Verified</p>
           </div>
 
           <div className="bg-white rounded-lg shadow-md p-6">
@@ -283,7 +282,6 @@ export function DashboardNational({ onNavigate }: DashboardNationalProps) {
               <Users className="w-5 h-5 text-green-600" />
             </div>
             <p className="text-3xl text-green-600">{heroMetrics.totalAtlet}</p>
-            <p className="text-xs text-gray-500 mt-1">Distinct athlete_name</p>
           </div>
 
           <div className="bg-white rounded-lg shadow-md p-6">
@@ -292,7 +290,6 @@ export function DashboardNational({ onNavigate }: DashboardNationalProps) {
               <Shield className="w-5 h-5 text-purple-600" />
             </div>
             <p className="text-3xl text-purple-600">{heroMetrics.totalPelatih}</p>
-            <p className="text-xs text-gray-500 mt-1">Profiles role=pelatih</p>
           </div>
 
           <div className="bg-white rounded-lg shadow-md p-6">
@@ -301,7 +298,6 @@ export function DashboardNational({ onNavigate }: DashboardNationalProps) {
               <MapPin className="w-5 h-5 text-orange-600" />
             </div>
             <p className="text-3xl text-orange-600">{heroMetrics.totalPengurus}</p>
-            <p className="text-xs text-gray-500 mt-1">Profiles role=admin_daerah</p>
           </div>
         </div>
 
@@ -309,7 +305,6 @@ export function DashboardNational({ onNavigate }: DashboardNationalProps) {
         <div className="bg-white rounded-lg shadow-md mb-8">
           <div className="p-6 border-b border-gray-200">
             <h2>Visualisasi Data 3 Bulan Terakhir</h2>
-            <p className="text-sm text-gray-600 mt-1">Berdasarkan injury_date</p>
           </div>
 
           <div className="p-6">
@@ -404,9 +399,6 @@ export function DashboardNational({ onNavigate }: DashboardNationalProps) {
               {/* Derajat / Severity */}
               <div className="bg-gray-50 rounded-lg p-6">
                 <h3 className="mb-1 text-gray-900">Distribusi Derajat Cedera</h3>
-                <p className="text-xs text-gray-600 mb-4">
-                  Berdasarkan <b>severity_level</b> pada laporan (bukan pain_level).
-                </p>
 
                 <div className="space-y-3">
                   {derajatData.length === 0 ? (

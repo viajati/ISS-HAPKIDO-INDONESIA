@@ -157,6 +157,18 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Forbidden: hanya admin nasional" }, { status: 403 });
     }
 
+    // Auto-expire tokens that passed their expiry date
+    const nowIso = new Date().toISOString();
+    const { error: autoExpireErr } = await auth.supabaseAdmin
+      .from("registration_tokens")
+      .update({ status: "expired" })
+      .eq("status", "active")
+      .lt("expires_at", nowIso);
+
+    if (autoExpireErr) {
+      return NextResponse.json({ error: "Gagal update status token: " + autoExpireErr.message }, { status: 400 });
+    }
+
     const { data, error } = await auth.supabaseAdmin
       .from("registration_tokens")
       .select("id, token, role, status, created_by, created_at, expires_at")

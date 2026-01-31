@@ -127,7 +127,7 @@ export function LoginPage({ onNavigate }: LoginPageProps) {
           <p className="text-gray-600 text-sm">Selamat datang kembali di Hapkido Indonesia</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
           {errors.login && (
             <div className="text-red-600 text-sm mb-2 text-center">{errors.login}</div>
           )}
@@ -141,6 +141,8 @@ export function LoginPage({ onNavigate }: LoginPageProps) {
               type="email"
               value={credentials.email}
               onChange={handleChange}
+              autoComplete="email"
+              inputMode="email"
               className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 ${errors.email ? "border-red-500 ring-2 ring-red-200" : "border-gray-300"}`}
               placeholder="Masukkan email"
               required
@@ -159,6 +161,7 @@ export function LoginPage({ onNavigate }: LoginPageProps) {
                 type={showPassword ? "text" : "password"}
                 value={credentials.password}
                 onChange={handleChange}
+                autoComplete="current-password"
                 className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 pr-10 ${errors.password ? "border-red-500 ring-2 ring-red-200" : "border-gray-300"}`}
                 placeholder="Masukkan kata sandi"
                 required

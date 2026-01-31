@@ -166,6 +166,15 @@ export function ProfilPage({
                 <p className="text-sm text-gray-600">Kelola informasi akun Anda</p>
               </div>
             </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right hidden md:block">
+                <p className="text-sm">{profileData.roleLabel}</p>
+                <p className="text-xs text-gray-600">{profileData.wilayah || "-"}</p>
+              </div>
+              <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white">
+                {(profileData.fullName?.charAt(0) || "U").toUpperCase()}
+              </div>
+            </div>
           </div>
         </div>
       </header>

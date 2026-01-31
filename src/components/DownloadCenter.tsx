@@ -184,10 +184,14 @@ async function fetchRawWide(start: string, end: string) {
     .order("injury_date", { ascending: true });
 
   if (error) throw error;
+
+  const nameMap = await fetchProfileNameMap((data ?? []).map((row) => row.user_id));
   
   // Flatten JSONB fields for better readability
   const flattened = (data ?? []).map(row => {
     const flatRow: any = { ...row };
+
+    flatRow.pelapor_name = nameMap.get(row.user_id) ?? "Tidak diketahui";
     
     // Flatten injuries array
     if (row.injuries && Array.isArray(row.injuries)) {
@@ -231,6 +235,8 @@ function wideToLong(rows: any[]) {
     for (const [key, value] of Object.entries(r)) {
       long.push({
         report_id: r.id,
+        user_id: r.user_id,
+        pelapor_name: r.pelapor_name,
         injury_date: r.injury_date,
         variable: key,
         value: typeof value === "object" ? JSON.stringify(value) : value,
@@ -278,6 +284,105 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function formatHeaderLabel(key: string) {
+  if (key === "pelapor_name") return "Nama Pelapor";
+  if (key === "user_id") return "User ID";
+  if (key === "report_id") return "Report ID";
+  if (key === "injury_date") return "Injury Date";
+  if (key === "created_at") return "Created At";
+  if (key === "updated_at") return "Updated At";
+  if (key === "verified_at") return "Verified At";
+  if (key === "verified_by") return "Verified By";
+  const words = key.split("_").map((w) => {
+    if (w === "id") return "ID";
+    if (w === "uuid") return "UUID";
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  });
+  return words.join(" ");
+}
+
+function prettifyRows(rows: any[]) {
+  return rows.map((row) => {
+    const out: Record<string, any> = {};
+    Object.entries(row).forEach(([key, value]) => {
+      out[formatHeaderLabel(key)] = value;
+    });
+    return out;
+  });
+}
+
+function orderRawWideRows(rows: any[]) {
+  const preferredOrder = [
+    "id",
+    "user_id",
+    "athlete_name",
+    "pelapor_name",
+    "gender",
+    "age",
+    "injury_date",
+    "activity_type",
+    "activity_context",
+    "injury_count",
+    "injuries_summary",
+    "movement_ability",
+    "pain_level",
+    "red_flags_list",
+    "red_flags_count",
+    "status",
+    "verified_by",
+    "verified_at",
+    "created_at",
+    "updated_at",
+  ];
+
+  return rows.map((row) => {
+    const ordered: Record<string, any> = {};
+    const seen = new Set<string>();
+
+    for (const key of preferredOrder) {
+      if (key in row) {
+        ordered[key] = row[key];
+        seen.add(key);
+      }
+    }
+
+    for (const key of Object.keys(row)) {
+      if (!seen.has(key)) ordered[key] = row[key];
+    }
+
+    return ordered;
+  });
+}
+
+function orderRawLongRows(rows: any[]) {
+  const preferredOrder = [
+    "report_id",
+    "user_id",
+    "pelapor_name",
+    "injury_date",
+    "variable",
+    "value",
+  ];
+
+  return rows.map((row) => {
+    const ordered: Record<string, any> = {};
+    const seen = new Set<string>();
+
+    for (const key of preferredOrder) {
+      if (key in row) {
+        ordered[key] = row[key];
+        seen.add(key);
+      }
+    }
+
+    for (const key of Object.keys(row)) {
+      if (!seen.has(key)) ordered[key] = row[key];
+    }
+
+    return ordered;
+  });
+}
+
 function monthKey(d: string) {
   return d.slice(0, 7); // YYYY-MM
 }
@@ -300,20 +405,20 @@ async function fetchVerifiedForAggregation(start: string, end: string) {
   return data ?? [];
 }
 
-async function fetchProfilesMap(userIds: string[]) {
+async function fetchProfileNameMap(userIds: string[]) {
   const unique = Array.from(new Set(userIds)).filter(Boolean);
   if (unique.length === 0) return new Map<string, string>();
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, wilayah")
+    .select("id, full_name")
     .in("id", unique);
 
   if (error) throw error;
 
   const m = new Map<string, string>();
   for (const p of data ?? []) {
-    m.set(p.id, p.wilayah ?? "Tidak diketahui");
+    m.set(p.id, p.full_name ?? "Tidak diketahui");
   }
   return m;
 }
@@ -384,13 +489,16 @@ export function DownloadCenter({
       // 1) RAW DATA
       if (type.startsWith("raw_excel") || type.startsWith("raw_csv")) {
         const wide = await fetchRawWide(start, end);
-        const rows = formatData === "wide" ? wide : wideToLong(wide);
+        const orderedWide = orderRawWideRows(wide);
+        const rows = formatData === "wide" ? orderedWide : wideToLong(orderedWide);
+        const orderedRows = formatData === "wide" ? rows : orderRawLongRows(rows);
+        const prettyRows = prettifyRows(orderedRows);
 
         const label = `${start}_to_${end}_${formatData}`;
         if (type === "raw_excel") {
-          toXlsxAndDownload([{ name: formatData.toUpperCase(), rows }], `raw_${label}.xlsx`);
+          toXlsxAndDownload([{ name: formatData.toUpperCase(), rows: prettyRows }], `raw_${label}.xlsx`);
         } else {
-          toCsvAndDownload(rows, `raw_${label}.csv`);
+          toCsvAndDownload(prettyRows, `raw_${label}.csv`);
         }
 
         toast.success("Download dimulai", { id: "dl" });
@@ -510,13 +618,20 @@ export function DownloadCenter({
           });
         });
 
+        const orderedCrosstabRows = crosstabRows.map((row) => ({
+          Kategori: row.Kategori,
+          Training: row.Training,
+          Competition: row.Competition,
+          Total: row.Total,
+        }));
+
         if (type === "crosstab_excel") {
           toXlsxAndDownload(
-            [{ name: "Crosstabulasi", rows: crosstabRows }],
+            [{ name: "Crosstabulasi", rows: orderedCrosstabRows }],
             `crosstab_${start}_to_${end}.xlsx`
           );
         } else {
-          toCsvAndDownload(crosstabRows, `crosstab_${start}_to_${end}.csv`);
+          toCsvAndDownload(orderedCrosstabRows, `crosstab_${start}_to_${end}.csv`);
         }
 
         toast.success("Download dimulai", { id: "dl" });
@@ -863,12 +978,6 @@ export function DownloadCenter({
                     Data Agregat Lengkap (Tidak Dibatasi)
                   </div>
                 </div>
-                <div className="mt-3 pt-3 border-t border-blue-300">
-                  <p className="text-sm text-blue-900">
-                    <strong>Excel:</strong> Dilengkapi dengan styling (header berwarna, border, bold text) untuk kemudahan membaca.<br />
-                    <strong>CSV:</strong> Format plain text yang kompatibel dengan semua aplikasi spreadsheet.
-                  </p>
-                </div>
               </div>
             </div>
 
@@ -901,18 +1010,6 @@ export function DownloadCenter({
             <li className="flex gap-2">
               <span className="text-teal-600 font-bold">•</span>
               <span>Semua data yang diexport sudah terverifikasi dan valid sesuai periode yang dipilih.</span>
-            </li>
-            <li className="flex gap-2">
-              <span className="text-teal-600 font-bold">•</span>
-              <span><strong>Format Crosstabulasi:</strong> Mengikuti format yang sama dengan halaman Visualisasi Data (Training vs Competition).</span>
-            </li>
-            <li className="flex gap-2">
-              <span className="text-teal-600 font-bold">•</span>
-              <span><strong>Styling Excel:</strong> File Excel dilengkapi dengan header berwarna, zebra-striping, border, dan bold text untuk kemudahan membaca.</span>
-            </li>
-            <li className="flex gap-2">
-              <span className="text-teal-600 font-bold">•</span>
-              <span>Data bersifat rahasia dan hanya untuk keperluan analisis internal organisasi.</span>
             </li>
             <li className="flex gap-2">
               <span className="text-teal-600 font-bold">•</span>
