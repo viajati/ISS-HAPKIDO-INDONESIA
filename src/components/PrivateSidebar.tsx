@@ -116,7 +116,7 @@ export function PrivateSidebar({
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 overflow-y-auto p-4">
+          <nav className="flex-1 overflow-y-auto p-4 sidebar-scroll">
             <div className="space-y-1">
               {menuItems.map((item) => {
                 // Heading - tidak clickable

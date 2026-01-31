@@ -68,6 +68,17 @@ export async function POST(req: Request) {
       );
     }
 
+    // 1b) Cek email sudah terdaftar di profiles
+    const { data: existingProfile } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (existingProfile) {
+      return NextResponse.json({ error: "Email sudah terdaftar." }, { status: 400 });
+    }
+
     // 2) Sign up auth user
     // Catatan: jika Confirm Email ON, user akan dibuat tapi belum confirmed sampai klik link email.
     const { data: signUpData, error: signUpErr } = await supabaseAnon.auth.signUp({
@@ -79,8 +90,12 @@ export async function POST(req: Request) {
     });
 
     if (signUpErr || !signUpData.user) {
+      const msg = signUpErr?.message || "Gagal membuat user auth.";
+      if (msg.toLowerCase().includes("already") || msg.toLowerCase().includes("registered")) {
+        return NextResponse.json({ error: "Email sudah terdaftar." }, { status: 400 });
+      }
       return NextResponse.json(
-        { error: signUpErr?.message || "Gagal membuat user auth." },
+        { error: msg },
         { status: 400 }
       );
     }
@@ -100,10 +115,14 @@ export async function POST(req: Request) {
     });
 
     if (profileErr) {
+      const msg = profileErr.message || "Gagal membuat profile";
+      if (msg.includes("profiles_email_key") || msg.includes("duplicate key")) {
+        return NextResponse.json({ error: "Email sudah terdaftar." }, { status: 400 });
+      }
       // rollback auth user (service role)
       await supabaseAdmin.auth.admin.deleteUser(userId);
       return NextResponse.json(
-        { error: "Gagal membuat profile: " + profileErr.message },
+        { error: "Gagal membuat profile: " + msg },
         { status: 400 }
       );
     }

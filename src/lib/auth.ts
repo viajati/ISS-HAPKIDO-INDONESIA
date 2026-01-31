@@ -61,6 +61,17 @@ export async function registerWithToken(params: {
     throw new Error('Username sudah digunakan');
   }
 
+  // 2b. Check email availability (profiles unique constraint)
+  const { data: existingEmail } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('email', params.email)
+    .maybeSingle();
+
+  if (existingEmail) {
+    throw new Error('Email sudah terdaftar');
+  }
+
   // 3. Create auth user
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email: params.email,
@@ -95,9 +106,21 @@ export async function registerWithToken(params: {
   });
 
   if (profileError) {
-    // Rollback auth user if profile creation fails
-    await supabase.auth.admin.deleteUser(authData.user.id);
-    throw new Error('Gagal membuat profile: ' + profileError.message);
+    const msg = profileError.message || 'Gagal membuat profile';
+    if (msg.includes('profiles_email_key') || msg.includes('duplicate key')) {
+      throw new Error('Email sudah terdaftar');
+    }
+
+    // Rollback auth user if profile creation fails (best effort)
+    try {
+      if (supabase.auth.admin?.deleteUser) {
+        await supabase.auth.admin.deleteUser(authData.user.id);
+      }
+    } catch {
+      // ignore cleanup errors
+    }
+
+    throw new Error('Gagal membuat profile: ' + msg);
   }
 
   // 5. Mark token as used
