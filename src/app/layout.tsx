@@ -18,7 +18,8 @@ export const metadata: Metadata = {
   title: "ISS Hapkido Indonesia",
   description: "Sistem Manajemen ISS Hapkido Indonesia",
   icons: {
-    icon: "/assets/hapkido-logo.png",
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
     apple: "/assets/hapkido-logo.png",
   },
 };
