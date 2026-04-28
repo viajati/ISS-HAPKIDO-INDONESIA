@@ -292,6 +292,12 @@ export type Database = {
         }
         Returns: Json
       }
+      admin_delete_verified_report: {
+        Args: {
+          p_report_id: number
+        }
+        Returns: Json
+      }
       is_admin_nasional: { Args: { uid: string }; Returns: boolean }
     }
     Enums: {
