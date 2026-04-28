@@ -11,6 +11,7 @@ import {
   MapPin,
   RefreshCw,
   Undo2,
+  Trash2,
 } from "lucide-react";
 import { ModalRingkasanData } from "./ModalRingkasanData";
 import { toast } from "sonner";
@@ -57,7 +58,6 @@ type DbRow = {
   verified_by: string | null;
   verified_at: string | null;
 
-  // ✅ many-to-one join returns object, but handle array too for robustness
   profiles: ProfileJoin | ProfileJoin[] | null;
 };
 
@@ -119,13 +119,25 @@ function normalizeActivity(base?: string | null, other?: string | null) {
 function firstProfile(p?: ProfileJoin | ProfileJoin[] | null): ProfileJoin | null {
   if (!p) return null;
   if (Array.isArray(p)) return p[0] ?? null;
-  return p; // object
+  return p;
 }
 
-function computeDerajatFromForm(movementAbility?: string | null, painLevel?: string | null, redFlags?: string[] | null) {
+function computeDerajatFromForm(
+  movementAbility?: string | null,
+  painLevel?: string | null,
+  redFlags?: string[] | null
+) {
   const rf = Array.isArray(redFlags) ? redFlags : [];
-  if (rf.length > 0 || movementAbility === "unable_to_move" || painLevel === "severe") return "Berat";
-  if (movementAbility === "limited_movement" || painLevel === "moderate") return "Sedang";
+  if (
+    rf.length > 0 ||
+    movementAbility === "unable_to_move" ||
+    painLevel === "severe"
+  ) {
+    return "Berat";
+  }
+  if (movementAbility === "limited_movement" || painLevel === "moderate") {
+    return "Sedang";
+  }
   return "Ringan";
 }
 
@@ -153,6 +165,7 @@ function locationSummary(injuries?: DbRow["injuries"]) {
   const first = Array.isArray(injuries) && injuries.length > 0 ? injuries[0] : null;
   return first?.location ?? "-";
 }
+
 function typeSummary(injuries?: DbRow["injuries"]) {
   const first = Array.isArray(injuries) && injuries.length > 0 ? injuries[0] : null;
   return first?.injuryType ?? "-";
@@ -166,7 +179,7 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDerajat, setFilterDerajat] = useState<string>("all");
   const [filterWilayah, setFilterWilayah] = useState<string>("all");
-  const [filterStatus, setFilterStatus] = useState<string>("all"); // all | verified | rejected
+  const [filterStatus, setFilterStatus] = useState<string>("all");
 
   const [selectedLaporan, setSelectedLaporan] = useState<LaporanVerified | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -181,19 +194,18 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
 
   const handleLogout = () => onNavigate("logout");
 
-  // Access control - only admin nasional can access this page
   useEffect(() => {
     if (loadingProfile) return;
-    
+
     if (!profile) {
-      toast.error('Anda harus login terlebih dahulu');
-      onNavigate('login');
+      toast.error("Anda harus login terlebih dahulu");
+      onNavigate("login");
       return;
     }
 
-    if (profile.role !== 'admin_nasional') {
-      toast.error('Akses ditolak. Halaman ini hanya untuk Admin Nasional.');
-      onNavigate('dashboard');
+    if (profile.role !== "admin_nasional") {
+      toast.error("Akses ditolak. Halaman ini hanya untuk Admin Nasional.");
+      onNavigate("dashboard");
       return;
     }
   }, [loadingProfile, profile, onNavigate]);
@@ -229,7 +241,7 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
 
       if (error) throw error;
 
-      const dbRows = ((data ?? []) as unknown) as DbRow[];
+      const dbRows = (data ?? []) as unknown as DbRow[];
 
       const roleMap: Record<string, string> = {
         pelatih: "Pelatih",
@@ -248,14 +260,21 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
         const tanggalLapor = formatDateYMD(r.created_at);
         const tanggalVerifikasi = formatDateYMD(r.verified_at ?? r.updated_at);
 
-        // Use pre-calculated severity_level from database (fallback to compute if null)
-        const derajat = r.severity_level 
-          ? (r.severity_level === 'ringan' ? 'Ringan' : r.severity_level === 'sedang' ? 'Sedang' : 'Berat')
+        const derajat = r.severity_level
+          ? r.severity_level === "ringan"
+            ? "Ringan"
+            : r.severity_level === "sedang"
+            ? "Sedang"
+            : "Berat"
           : computeDerajatFromForm(r.movement_ability, r.pain_level, r.red_flags);
 
         const cederaDetails =
           Array.isArray(r.injuries) && r.injuries.length > 0
-            ? r.injuries.map((i) => ({ lokasi: i.location, jenis: i.injuryType, mekanisme: i.mechanism }))
+            ? r.injuries.map((i) => ({
+                lokasi: i.location,
+                jenis: i.injuryType,
+                mekanisme: i.mechanism,
+              }))
             : [];
 
         return {
@@ -294,8 +313,11 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
       setRows(mapped);
       setCurrentPage(1);
     } catch (err) {
-      if (err instanceof Error) setErrorMsg(err.message || "Gagal memuat laporan yang sudah diproses.");
-      else setErrorMsg("Gagal memuat laporan yang sudah diproses.");
+      if (err instanceof Error) {
+        setErrorMsg(err.message || "Gagal memuat laporan yang sudah diproses.");
+      } else {
+        setErrorMsg("Gagal memuat laporan yang sudah diproses.");
+      }
       setRows([]);
     } finally {
       setLoading(false);
@@ -328,8 +350,11 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
         laporan.atlet.nama.toLowerCase().includes(q) ||
         laporan.pelapor.wilayah.toLowerCase().includes(q);
 
-      const matchDerajat = filterDerajat === "all" || laporan.cedera.derajat === filterDerajat;
-      const matchWilayah = filterWilayah === "all" || laporan.pelapor.wilayah === filterWilayah;
+      const matchDerajat =
+        filterDerajat === "all" || laporan.cedera.derajat === filterDerajat;
+
+      const matchWilayah =
+        filterWilayah === "all" || laporan.pelapor.wilayah === filterWilayah;
 
       const statusRaw = laporan.status === "Terverifikasi" ? "verified" : "rejected";
       const matchStatus = filterStatus === "all" || statusRaw === filterStatus;
@@ -338,7 +363,6 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
     });
   }, [rows, searchQuery, filterDerajat, filterWilayah, filterStatus]);
 
-  // pagination
   const totalPages = Math.ceil(filteredData.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
@@ -369,13 +393,16 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
   };
 
   const getStatusBadge = (status: "Terverifikasi" | "Ditolak") => {
-    if (status === "Terverifikasi") return "bg-green-100 text-green-700 border-green-300";
+    if (status === "Terverifikasi") {
+      return "bg-green-100 text-green-700 border-green-300";
+    }
     return "bg-red-100 text-red-700 border-red-300";
   };
 
-  // ✅ UNDO: verified/rejected -> submitted (back to Menunggu Verifikasi)
   const handleUndo = async (id: string) => {
-    const ok = confirm("Kembalikan laporan ini ke status Menunggu Verifikasi (submitted) untuk verifikasi ulang?");
+    const ok = confirm(
+      "Kembalikan laporan ini ke status Menunggu Verifikasi (submitted) untuk verifikasi ulang?"
+    );
     if (!ok) return;
 
     setBusyId(id);
@@ -395,7 +422,11 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
       if (error) throw error;
 
       setRows((prev) => prev.filter((x) => x.id !== id));
-      if (selectedLaporan?.id === id) setShowDetailModal(false);
+
+      if (selectedLaporan?.id === id) {
+        setShowDetailModal(false);
+        setSelectedLaporan(null);
+      }
 
       alert("↩️ Berhasil dikembalikan ke Menunggu Verifikasi.");
     } catch (err) {
@@ -406,10 +437,56 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
     }
   };
 
-  // reset page when filters change
-  useEffect(() => setCurrentPage(1), [searchQuery, filterDerajat, filterWilayah, filterStatus]);
+  const handleDelete = async (id: string) => {
+    const ok = confirm(
+      "Yakin ingin menghapus laporan ini secara permanen? Data akan hilang dari database dan tidak muncul lagi di CSV."
+    );
+    if (!ok) return;
 
-  // Show loading while checking access
+    setBusyId(id);
+    setErrorMsg(null);
+
+    try {
+      const res = await fetch("/api/verify-report", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          report_id: Number(id),
+          action: "delete",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Gagal menghapus laporan.");
+      }
+
+      setRows((prev) => prev.filter((x) => x.id !== id));
+
+      if (selectedLaporan?.id === id) {
+        setShowDetailModal(false);
+        setSelectedLaporan(null);
+      }
+
+      alert("Laporan berhasil dihapus permanen.");
+    } catch (err) {
+      if (err instanceof Error) {
+        setErrorMsg(err.message || "Gagal menghapus laporan.");
+      } else {
+        setErrorMsg("Gagal menghapus laporan.");
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterDerajat, filterWilayah, filterStatus]);
+
   if (loadingProfile) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -418,8 +495,7 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
     );
   }
 
-  // Don't render if not authorized
-  if (!profile || profile.role !== 'admin_nasional') {
+  if (!profile || profile.role !== "admin_nasional") {
     return null;
   }
 
@@ -434,17 +510,23 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
         userRole="admin_nasional"
       />
 
-      {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
         <div className="px-4 py-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-4">
-              <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden text-gray-600 hover:text-gray-900">
+              <button
+                onClick={() => setIsSidebarOpen(true)}
+                className="lg:hidden text-gray-600 hover:text-gray-900"
+              >
                 <Menu className="w-6 h-6" />
               </button>
+
               <div>
                 <h1 className="text-xl">Sudah Diproses Admin</h1>
-                <p className="text-sm text-gray-600">Daftar laporan yang sudah diverifikasi / ditolak (status: verified/rejected)</p>
+                <p className="text-sm text-gray-600">
+                  Daftar laporan yang sudah diverifikasi / ditolak (status:
+                  verified/rejected)
+                </p>
                 {errorMsg && <p className="text-xs text-red-600 mt-1">{errorMsg}</p>}
                 {loading && <p className="text-xs text-gray-500 mt-1">Memuat data...</p>}
               </div>
@@ -464,7 +546,6 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
       </header>
 
       <main className="p-4 md:p-6 lg:p-8">
-        {/* Stats */}
         <div className="max-w-sm mb-6">
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center justify-between mb-2">
@@ -476,7 +557,6 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
           </div>
         </div>
 
-        {/* Filters */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
           <div className="flex flex-col gap-4">
             <div className="flex-1 relative">
@@ -536,21 +616,38 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
           </div>
         </div>
 
-        {/* Table */}
         <div className="bg-white rounded-lg shadow-md overflow-hidden mb-6">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">ID</th>
-                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">Tgl Kejadian</th>
-                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">Pelapor</th>
-                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">Atlet</th>
-                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">Cedera</th>
-                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">Derajat</th>
-                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">Tgl Proses</th>
-                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">Aksi</th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">
+                    ID
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">
+                    Tgl Kejadian
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">
+                    Pelapor
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">
+                    Atlet
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">
+                    Cedera
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">
+                    Derajat
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">
+                    Tgl Proses
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-600 uppercase tracking-wider">
+                    Aksi
+                  </th>
                 </tr>
               </thead>
 
@@ -560,7 +657,10 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
                     <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
                       {loading
                         ? "Memuat..."
-                        : searchQuery || filterDerajat !== "all" || filterWilayah !== "all" || filterStatus !== "all"
+                        : searchQuery ||
+                          filterDerajat !== "all" ||
+                          filterWilayah !== "all" ||
+                          filterStatus !== "all"
                         ? "Tidak ada data yang sesuai filter"
                         : "Belum ada laporan yang diproses"}
                     </td>
@@ -573,40 +673,62 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
                       </td>
 
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-3 py-1 inline-flex text-xs leading-5 rounded-full border ${getStatusBadge(laporan.status)}`}>
+                        <span
+                          className={`px-3 py-1 inline-flex text-xs leading-5 rounded-full border ${getStatusBadge(
+                            laporan.status
+                          )}`}
+                        >
                           {laporan.status}
                         </span>
                       </td>
 
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{laporan.tanggalKejadian}</div>
+                        <div className="text-sm text-gray-900">
+                          {laporan.tanggalKejadian}
+                        </div>
                       </td>
 
                       <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">{laporan.pelapor.nama}</div>
-                        <div className="text-xs text-gray-500">{laporan.pelapor.wilayah}</div>
+                        <div className="text-sm text-gray-900">
+                          {laporan.pelapor.nama}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {laporan.pelapor.wilayah}
+                        </div>
                       </td>
 
                       <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">{laporan.atlet.nama}</div>
+                        <div className="text-sm text-gray-900">
+                          {laporan.atlet.nama}
+                        </div>
                         <div className="text-xs text-gray-500">
                           {laporan.atlet.jenisKelamin}, {laporan.atlet.umur} tahun
                         </div>
                       </td>
 
                       <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">{laporan.cedera.lokasi}</div>
-                        <div className="text-xs text-gray-500">{laporan.cedera.jenis}</div>
+                        <div className="text-sm text-gray-900">
+                          {laporan.cedera.lokasi}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {laporan.cedera.jenis}
+                        </div>
                       </td>
 
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-3 py-1 inline-flex text-xs leading-5 rounded-full border ${getDerajatColor(laporan.cedera.derajat)}`}>
+                        <span
+                          className={`px-3 py-1 inline-flex text-xs leading-5 rounded-full border ${getDerajatColor(
+                            laporan.cedera.derajat
+                          )}`}
+                        >
                           {laporan.cedera.derajat}
                         </span>
                       </td>
 
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{laporan.tanggalVerifikasi}</div>
+                        <div className="text-sm text-gray-900">
+                          {laporan.tanggalVerifikasi}
+                        </div>
                       </td>
 
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -619,7 +741,6 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
                             <Eye className="w-4 h-4" />
                           </button>
 
-                          {/* ✅ SAME undo handler as modal */}
                           <button
                             onClick={() => handleUndo(laporan.id)}
                             disabled={busyId === laporan.id}
@@ -628,9 +749,20 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
                           >
                             <Undo2 className="w-4 h-4" />
                           </button>
+
+                          <button
+                            onClick={() => handleDelete(laporan.id)}
+                            disabled={busyId === laporan.id}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Hapus permanen"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
 
-                        {busyId === laporan.id && <p className="text-xs text-gray-500 mt-2">Memproses...</p>}
+                        {busyId === laporan.id && (
+                          <p className="text-xs text-gray-500 mt-2">Memproses...</p>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -640,41 +772,57 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
           </div>
         </div>
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="mt-6 flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="text-sm text-gray-600">
-              Menampilkan {startIndex + 1} - {Math.min(endIndex, filteredData.length)} dari {filteredData.length} laporan
+              Menampilkan {startIndex + 1} -{" "}
+              {Math.min(endIndex, filteredData.length)} dari {filteredData.length}{" "}
+              laporan
             </div>
 
             <div className="flex items-center gap-2">
               <button
                 onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage === 1}
-                className={`p-2 rounded-lg transition-colors ${currentPage === 1 ? "text-gray-400 cursor-not-allowed" : "text-blue-600 hover:bg-blue-50"}`}
+                className={`p-2 rounded-lg transition-colors ${
+                  currentPage === 1
+                    ? "text-gray-400 cursor-not-allowed"
+                    : "text-blue-600 hover:bg-blue-50"
+                }`}
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
 
               <div className="flex gap-1">
                 {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
-                  if (page === 1 || page === totalPages || (page >= currentPage - 1 && page <= currentPage + 1)) {
+                  if (
+                    page === 1 ||
+                    page === totalPages ||
+                    (page >= currentPage - 1 && page <= currentPage + 1)
+                  ) {
                     return (
                       <button
                         key={page}
                         onClick={() => handlePageChange(page)}
-                        className={`px-3 py-1 rounded-lg transition-colors ${currentPage === page ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}
+                        className={`px-3 py-1 rounded-lg transition-colors ${
+                          currentPage === page
+                            ? "bg-blue-600 text-white"
+                            : "text-gray-700 hover:bg-gray-100"
+                        }`}
                       >
                         {page}
                       </button>
                     );
-                  } else if (page === currentPage - 2 || page === currentPage + 2) {
+                  }
+
+                  if (page === currentPage - 2 || page === currentPage + 2) {
                     return (
                       <span key={page} className="px-2 text-gray-400">
                         ...
                       </span>
                     );
                   }
+
                   return null;
                 })}
               </div>
@@ -682,7 +830,11 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
               <button
                 onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage === totalPages}
-                className={`p-2 rounded-lg transition-colors ${currentPage === totalPages ? "text-gray-400 cursor-not-allowed" : "text-blue-600 hover:bg-blue-50"}`}
+                className={`p-2 rounded-lg transition-colors ${
+                  currentPage === totalPages
+                    ? "text-gray-400 cursor-not-allowed"
+                    : "text-blue-600 hover:bg-blue-50"
+                }`}
               >
                 <ChevronRight className="w-5 h-5" />
               </button>
@@ -691,7 +843,6 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
         )}
       </main>
 
-      {/* Modal Ringkasan Data */}
       <ModalRingkasanData
         isOpen={showDetailModal}
         onClose={() => setShowDetailModal(false)}
@@ -716,16 +867,24 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
         }}
       />
 
-      {/* Floating action when modal open */}
       {showDetailModal && selectedLaporan && (
         <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-[60] flex gap-3">
-          {/* ✅ SAME undo handler as table */}
           <button
             onClick={() => handleUndo(selectedLaporan.id)}
-            className="flex items-center gap-2 px-6 py-3 bg-gray-800 text-white rounded-lg hover:bg-black transition-colors shadow-lg"
+            disabled={busyId === selectedLaporan.id}
+            className="flex items-center gap-2 px-6 py-3 bg-gray-800 text-white rounded-lg hover:bg-black transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Undo2 className="w-5 h-5" />
-            Undo (kembalikan ke pending)
+            Undo
+          </button>
+
+          <button
+            onClick={() => handleDelete(selectedLaporan.id)}
+            disabled={busyId === selectedLaporan.id}
+            className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Trash2 className="w-5 h-5" />
+            Hapus Permanen
           </button>
         </div>
       )}
