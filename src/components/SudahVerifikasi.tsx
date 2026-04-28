@@ -19,15 +19,13 @@ import { toast } from "sonner";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/auth-context";
 
-/* ================= TYPES ================= */
-
 interface SudahVerifikasiProps {
   onNavigate: (page: string) => void;
 }
 
 type ProfileJoin = {
   full_name: string;
-  role: string;
+  role: "pelatih" | "admin_daerah" | "admin_nasional" | string;
   wilayah: string | null;
   email?: string | null;
 };
@@ -45,12 +43,12 @@ type DbRow = {
   activity_type_other: string | null;
   activity_context: string | null;
   activity_context_other: string | null;
-  injuries: any;
+  injuries: Array<{ location: string; injuryType: string; mechanism: string }> | null;
   movement_ability: string | null;
   pain_level: string | null;
   red_flags: string[] | null;
   severity_level: string | null;
-  status: string;
+  status: "verified" | "rejected" | string;
   verified_by: string | null;
   verified_at: string | null;
   profiles: ProfileJoin | ProfileJoin[] | null;
@@ -69,15 +67,18 @@ interface LaporanVerified {
   status: "Terverifikasi" | "Ditolak";
 }
 
-/* ================= HELPERS ================= */
+function formatDateYMD(iso?: string | null) {
+  if (!iso) return "-";
+  return new Date(iso).toISOString().split("T")[0];
+}
 
-const formatDate = (iso?: string | null) =>
-  iso ? new Date(iso).toISOString().split("T")[0] : "-";
-
-/* ================= COMPONENT ================= */
+function firstProfile(p?: ProfileJoin | ProfileJoin[] | null): ProfileJoin | null {
+  if (!p) return null;
+  return Array.isArray(p) ? p[0] : p;
+}
 
 export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
-  const { user, profile, loadingProfile } = useAuth();
+  const { user, loadingProfile, profile } = useAuth();
 
   const [rows, setRows] = useState<LaporanVerified[]>([]);
   const [loading, setLoading] = useState(false);
@@ -87,46 +88,64 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
   const [selectedLaporan, setSelectedLaporan] = useState<LaporanVerified | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
-  /* ================= LOAD ================= */
+  useEffect(() => {
+    if (loadingProfile) return;
+
+    if (!profile) {
+      toast.error("Harus login");
+      onNavigate("login");
+      return;
+    }
+
+    if (profile.role !== "admin_nasional") {
+      toast.error("Akses ditolak");
+      onNavigate("dashboard");
+    }
+  }, [loadingProfile, profile]);
 
   const loadReviewed = async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from("injury_reports")
-        .select("*, profiles(full_name, role, wilayah)")
-        .in("status", ["verified", "rejected"])
-        .order("verified_at", { ascending: false });
+        .select(
+          `id, created_at, injury_date, severity_level,
+           athlete_name, gender, age,
+           status, verified_at,
+           profiles:profiles!injury_reports_user_id_fkey(full_name, role, wilayah)`
+        )
+        .in("status", ["verified", "rejected"]);
 
       if (error) throw error;
 
-      const mapped = (data as DbRow[]).map((r) => ({
-        id: String(r.id),
-        tanggalLapor: formatDate(r.created_at),
-        tanggalKejadian: formatDate(r.injury_date),
-        tanggalVerifikasi: formatDate(r.verified_at),
-        pelapor: {
-          nama: (r.profiles as any)?.full_name || "-",
-          role: (r.profiles as any)?.role || "-",
-          wilayah: (r.profiles as any)?.wilayah || "-",
-        },
-        atlet: {
-          nama: r.athlete_name || "-",
-          umur: r.age || 0,
-          jenisKelamin: r.gender || "-",
-        },
-        cedera: {
-          lokasi: r.injuries?.[0]?.location || "-",
-          jenis: r.injuries?.[0]?.injuryType || "-",
-          derajat: r.severity_level || "-",
-        },
-        kegiatan: {
-          jenis: r.activity_type || "-",
-          konteks: r.activity_context || "-",
-        },
-        verifikator: "Admin Nasional",
-        status: r.status === "verified" ? "Terverifikasi" : "Ditolak",
-      }));
+      const mapped = (data as DbRow[]).map((r) => {
+        const p = firstProfile(r.profiles);
+
+        return {
+          id: String(r.id),
+          tanggalLapor: formatDateYMD(r.created_at),
+          tanggalKejadian: formatDateYMD(r.injury_date),
+          tanggalVerifikasi: formatDateYMD(r.verified_at),
+          pelapor: {
+            nama: p?.full_name || "-",
+            role: p?.role || "-",
+            wilayah: p?.wilayah || "-",
+          },
+          atlet: {
+            nama: r.athlete_name || "-",
+            umur: r.age || 0,
+            jenisKelamin: r.gender || "-",
+          },
+          cedera: {
+            lokasi: "-",
+            jenis: "-",
+            derajat: r.severity_level || "-",
+          },
+          kegiatan: { jenis: "-", konteks: "-" },
+          verifikator: "Admin Nasional",
+          status: r.status === "verified" ? "Terverifikasi" : "Ditolak",
+        };
+      });
 
       setRows(mapped);
     } catch (err: any) {
@@ -137,20 +156,18 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
   };
 
   useEffect(() => {
-    if (!loadingProfile) loadReviewed();
-  }, [loadingProfile]);
-
-  /* ================= ACTIONS ================= */
+    loadReviewed();
+  }, []);
 
   // UNDO
   const handleUndo = async (id: string) => {
-    if (!confirm("Kembalikan ke pending?")) return;
+    if (!confirm("Undo ke pending?")) return;
 
     setBusyId(id);
     try {
       const { error } = await supabase
         .from("injury_reports")
-        .update({ status: "submitted", verified_by: null, verified_at: null })
+        .update({ status: "submitted" })
         .eq("id", Number(id));
 
       if (error) throw error;
@@ -163,7 +180,7 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
     }
   };
 
-  // DELETE (🔥 FINAL FIX)
+  // DELETE
   const handleDelete = async (id: string) => {
     if (!confirm("Hapus permanen?")) return;
 
@@ -182,8 +199,6 @@ export function SudahVerifikasi({ onNavigate }: SudahVerifikasiProps) {
       setBusyId(null);
     }
   };
-
-  /* ================= UI ================= */
 
   return (
     <div className="p-6">
