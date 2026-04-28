@@ -17,11 +17,6 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ISS Hapkido Indonesia",
   description: "Sistem Manajemen ISS Hapkido Indonesia",
-  icons: {
-    icon: "/favicon.ico",
-    shortcut: "/favicon.ico",
-    apple: "/assets/hapkido-logo.png",
-  },
 };
 
 export default function RootLayout({
